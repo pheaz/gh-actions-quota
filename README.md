@@ -1,77 +1,94 @@
 # github-actions-quota
 
-`github-actions-quota` is a small, standard-library-only Python package for
-quota-aware GitHub Actions CI gating. It converts Actions billing discounts to
-Linux-equivalent included minutes at `$0.006/min`, then selects full, minimal,
-or no CI. Consuming repositories decide which checks belong to minimal CI.
+`github-actions-quota` is a small, standard-library-only Python package that
+measures GitHub Actions quota usage. It converts Actions billing discounts to
+Linux-equivalent included minutes at `$0.006/min`. Repositories—not this
+package—define their CI thresholds directly in workflow job conditions.
 
 ## Python API
 
 ```python
 from decimal import Decimal
 
-from github_actions_quota import evaluate_quota
+from github_actions_quota import calculate_usage
 
-decision = evaluate_quota(Decimal("1200"))
-print(decision.state)
+usage = calculate_usage(Decimal("1200"))
+print(usage.usage_percent)  # 60.0
 ```
 
 The public API also provides `fetch_used_minutes` and `parse_used_minutes` for
-retrieving or parsing billing usage.
+retrieving and parsing billing usage. Personal repository owners use GitHub's
+user billing endpoint; organization owners use its organization billing
+endpoint.
 
-## GitHub Actions CLI
+## Authentication and configuration
 
-Set `GITHUB_ACTIONS_QUOTA_TOKEN` to a GitHub token capable of reading the user's
-billing/plan usage, and set `GITHUB_REPOSITORY_OWNER`. Do not store the token in
-source; pass it through GitHub Actions secrets. Then run:
+Configure trusted GitHub Actions runs with:
 
-```console
-github-actions-quota
+```text
+Repository/organization secret:
+ACTIONS_QUOTA_TOKEN
+
+Repository/organization variable:
+ACTIONS_QUOTA_MINUTES=2000
 ```
 
-The optional `GITHUB_ACTIONS_QUOTA_MINUTES` overrides the default 2,000-minute
-quota. In Actions, the command writes policy fields to `GITHUB_OUTPUT` and a
-human-readable report to `GITHUB_STEP_SUMMARY`.
+The token needs Plan read permission for a user account or organization
+Administration read permission for an organization. The quota variable is
+optional and defaults to 2,000 minutes. GitHub Actions automatically supplies
+`GITHUB_REPOSITORY_OWNER`; do not configure it yourself.
+
+Locally, `ACTIONS_QUOTA_TOKEN` takes precedence. When it is absent, the command
+uses `gh auth token`, so developers can run `github-actions-quota` after
+`gh auth login`. It resolves the current repository owner with `gh` when
+`GITHUB_REPOSITORY_OWNER` is also absent.
+
+Billing always belongs to the repository owner, never `GITHUB_ACTOR` or a pull
+request author. All contributors and coding agents working in a repository
+therefore share its owner's quota; their personal GitHub quotas are irrelevant.
+
+For a public repository in the normal Actions workflow context, the command
+reports zero percent without requiring a billing token. Included-minute quota
+is not applicable because standard GitHub-hosted runners are free for public
+repositories. This does not describe larger runners or other separately billed
+runner products.
 
 ## CI integration
 
-Use the package directly from `src` in a controller job, then gate expensive
-and minimal jobs with its outputs. Fork pull requests take a separate path so
-they receive no billing secret while still running the full suite:
+The CLI writes `usage_available`, `used_minutes`, `quota_minutes`,
+`usage_percent`, `billing_owner`, and `billing_owner_type` to `GITHUB_OUTPUT`.
+Keep each quality check as its own job and put readable thresholds directly in
+the consuming workflow:
 
 ```yaml
 jobs:
   quota:
     runs-on: ubuntu-latest
     outputs:
-      ci_state: ${{ steps.quota.outputs.ci_state || steps.fork.outputs.ci_state }}
-      ci_reason: ${{ steps.quota.outputs.ci_reason || steps.fork.outputs.ci_reason }}
-      full_ci: ${{ steps.quota.outputs.full_ci || steps.fork.outputs.full_ci }}
-      minimal_ci: ${{ steps.quota.outputs.minimal_ci || steps.fork.outputs.minimal_ci }}
+      usage_available: ${{ steps.quota.outputs.usage_available }}
+      usage_percent: ${{ steps.quota.outputs.usage_percent }}
     steps:
       - uses: actions/checkout@v4
       - id: quota
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         env:
           PYTHONPATH: src
-          GITHUB_ACTIONS_QUOTA_TOKEN: ${{ secrets.GITHUB_ACTIONS_QUOTA_TOKEN }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
+          ACTIONS_QUOTA_MINUTES: ${{ vars.ACTIONS_QUOTA_MINUTES || '2000' }}
         run: python3 -m github_actions_quota
-      - id: fork
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true
-        run: |
-          echo "ci_state=full" >> "$GITHUB_OUTPUT"
-          echo "ci_reason=fork_pull_request" >> "$GITHUB_OUTPUT"
-          echo "full_ci=true" >> "$GITHUB_OUTPUT"
-          echo "minimal_ci=true" >> "$GITHUB_OUTPUT"
 
-  quality:
+  tests:
     needs: quota
-    if: needs.quota.outputs.full_ci == 'true'
-    # Full test and lint steps.
+    if: needs.quota.outputs.usage_percent < 50
+    # Test steps.
 
   lock:
     needs: quota
-    if: needs.quota.outputs.minimal_ci == 'true'
-    # Minimal lockfile check.
+    if: needs.quota.outputs.usage_percent < 100
+    # Lockfile check.
 ```
+
+For fail-closed gating, also include
+`needs.quota.outputs.usage_available == 'true'` as this repository's workflow
+does. Authentication or API failures emit a warning and an unavailable result,
+but exit successfully so dependent jobs are intentionally skipped rather than
+reported as failures.
