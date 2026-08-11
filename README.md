@@ -32,3 +32,46 @@ github-actions-quota
 The optional `GITHUB_ACTIONS_QUOTA_MINUTES` overrides the default 2,000-minute
 quota. In Actions, the command writes policy fields to `GITHUB_OUTPUT` and a
 human-readable report to `GITHUB_STEP_SUMMARY`.
+
+## CI integration
+
+Use the package directly from `src` in a controller job, then gate expensive
+and minimal jobs with its outputs. Fork pull requests take a separate path so
+they receive no billing secret while still running the full suite:
+
+```yaml
+jobs:
+  quota:
+    runs-on: ubuntu-latest
+    outputs:
+      ci_state: ${{ steps.quota.outputs.ci_state || steps.fork.outputs.ci_state }}
+      ci_reason: ${{ steps.quota.outputs.ci_reason || steps.fork.outputs.ci_reason }}
+      full_ci: ${{ steps.quota.outputs.full_ci || steps.fork.outputs.full_ci }}
+      minimal_ci: ${{ steps.quota.outputs.minimal_ci || steps.fork.outputs.minimal_ci }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: quota
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        env:
+          PYTHONPATH: src
+          GITHUB_ACTIONS_QUOTA_TOKEN: ${{ secrets.GITHUB_ACTIONS_QUOTA_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: python3 -m github_actions_quota
+      - id: fork
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true
+        run: |
+          echo "ci_state=full" >> "$GITHUB_OUTPUT"
+          echo "ci_reason=fork_pull_request" >> "$GITHUB_OUTPUT"
+          echo "full_ci=true" >> "$GITHUB_OUTPUT"
+          echo "minimal_ci=true" >> "$GITHUB_OUTPUT"
+
+  quality:
+    needs: quota
+    if: needs.quota.outputs.full_ci == 'true'
+    # Full test and lint steps.
+
+  lock:
+    needs: quota
+    if: needs.quota.outputs.minimal_ci == 'true'
+    # Minimal lockfile check.
+```
