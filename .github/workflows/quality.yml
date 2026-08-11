@@ -5,11 +5,43 @@ on:
   pull_request:
 
 jobs:
+  quota:
+    name: Actions quota
+    runs-on: ubuntu-latest
+    outputs:
+      ci_state: ${{ steps.quota.outputs.ci_state || steps.fork.outputs.ci_state }}
+      ci_reason: ${{ steps.quota.outputs.ci_reason || steps.fork.outputs.ci_reason }}
+      full_ci: ${{ steps.quota.outputs.full_ci || steps.fork.outputs.full_ci }}
+      minimal_ci: ${{ steps.quota.outputs.minimal_ci || steps.fork.outputs.minimal_ci }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Evaluate Actions quota
+        id: quota
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        env:
+          PYTHONPATH: src
+          GITHUB_ACTIONS_QUOTA_TOKEN: ${{ secrets.GITHUB_ACTIONS_QUOTA_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_ACTIONS_QUOTA_MINUTES: ${{ vars.GITHUB_ACTIONS_QUOTA_MINUTES || '2000' }}
+        run: python3 -m github_actions_quota
+
+      - name: Allow full CI for fork pull requests
+        id: fork
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true
+        run: |
+          echo "ci_state=full" >> "$GITHUB_OUTPUT"
+          echo "ci_reason=fork_pull_request" >> "$GITHUB_OUTPUT"
+          echo "full_ci=true" >> "$GITHUB_OUTPUT"
+          echo "minimal_ci=true" >> "$GITHUB_OUTPUT"
+
   quality:
+    needs: quota
+    if: needs.quota.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v6.7.0
         with:
           enable-cache: true
       - uses: actions/setup-python@v5
@@ -20,3 +52,12 @@ jobs:
       - run: uv run ruff check .
       - run: uv run basedpyright
       - run: uv run pytest
+
+  lock:
+    needs: quota
+    if: needs.quota.outputs.minimal_ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6.7.0
+      - run: uv lock --check
