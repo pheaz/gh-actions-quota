@@ -55,23 +55,61 @@ def parse_used_minutes(response_body: bytes) -> Decimal:
 
 
 def fetch_used_minutes(
-    username: str,
+    owner: str,
     token: str,
     *,
+    owner_type: str | None = None,
     now: datetime | None = None,
     opener: HttpOpener | None = None,
 ) -> Decimal:
-    """Fetch and parse the current month's user Actions billing summary."""
+    """Fetch the repository owner's current Actions billing usage."""
+    selected_opener = opener or urllib.request.build_opener()
+    resolved_type = owner_type or fetch_owner_type(owner, token, opener=selected_opener)
     current_time = now or datetime.now(UTC)
     query = urllib.parse.urlencode(
         {"year": current_time.year, "month": current_time.month, "product": "Actions"}
     )
-    username_path = urllib.parse.quote(username, safe="")
-    url = (
-        f"https://api.github.com/users/{username_path}/settings/billing/usage/summary"
-        f"?{query}"
+    owner_path = urllib.parse.quote(owner, safe="")
+    if resolved_type == "user":
+        resource = f"users/{owner_path}"
+    elif resolved_type == "organization":
+        resource = f"organizations/{owner_path}"
+    else:
+        raise ValueError(f"unsupported GitHub owner type: {resolved_type}")
+    request = _request(
+        f"https://api.github.com/{resource}/settings/billing/usage/summary?{query}",
+        token,
     )
-    request = urllib.request.Request(  # noqa: S310 -- URL is fixed to HTTPS.
+    response = selected_opener.open(request)
+    try:
+        return parse_used_minutes(response.read())
+    finally:
+        response.close()
+
+
+def fetch_owner_type(
+    owner: str, token: str, *, opener: HttpOpener | None = None
+) -> str:
+    """Resolve a GitHub login to ``user`` or ``organization`` explicitly."""
+    selected_opener = opener or urllib.request.build_opener()
+    owner_path = urllib.parse.quote(owner, safe="")
+    response = selected_opener.open(
+        _request(f"https://api.github.com/users/{owner_path}", token)
+    )
+    try:
+        payload: object = json.loads(response.read())
+    finally:
+        response.close()
+    account = _require_mapping(payload, "GitHub owner response")
+    account_type = _require_string(account.get("type"), "GitHub owner response type")
+    normalized = account_type.lower()
+    if normalized not in {"user", "organization"}:
+        raise ValueError(f"unsupported GitHub owner type: {account_type}")
+    return normalized
+
+
+def _request(url: str, token: str) -> urllib.request.Request:
+    return urllib.request.Request(  # noqa: S310 -- URL is fixed to HTTPS.
         url,
         headers={
             "Authorization": f"Bearer {token}",
@@ -80,12 +118,6 @@ def fetch_used_minutes(
             "User-Agent": "github-actions-quota",
         },
     )
-    selected_opener = opener or urllib.request.build_opener()
-    response = selected_opener.open(request)
-    try:
-        return parse_used_minutes(response.read())
-    finally:
-        response.close()
 
 
 def _reject_json_constant(value: str) -> Decimal:

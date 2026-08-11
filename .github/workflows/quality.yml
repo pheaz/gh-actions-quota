@@ -9,53 +9,74 @@ jobs:
     name: Actions quota
     runs-on: ubuntu-latest
     outputs:
-      ci_state: ${{ steps.quota.outputs.ci_state || steps.fork.outputs.ci_state }}
-      ci_reason: ${{ steps.quota.outputs.ci_reason || steps.fork.outputs.ci_reason }}
-      full_ci: ${{ steps.quota.outputs.full_ci || steps.fork.outputs.full_ci }}
-      minimal_ci: ${{ steps.quota.outputs.minimal_ci || steps.fork.outputs.minimal_ci }}
+      usage_available: ${{ steps.quota.outputs.usage_available }}
+      usage_percent: ${{ steps.quota.outputs.usage_percent }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Evaluate Actions quota
+      - name: Measure Actions quota
         id: quota
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         env:
           PYTHONPATH: src
-          GITHUB_ACTIONS_QUOTA_TOKEN: ${{ secrets.GITHUB_ACTIONS_QUOTA_TOKEN }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_ACTIONS_QUOTA_MINUTES: ${{ vars.GITHUB_ACTIONS_QUOTA_MINUTES || '2000' }}
+          ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
+          ACTIONS_QUOTA_MINUTES: ${{ vars.ACTIONS_QUOTA_MINUTES || '2000' }}
         run: python3 -m github_actions_quota
 
-      - name: Allow full CI for fork pull requests
-        id: fork
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true
-        run: |
-          echo "ci_state=full" >> "$GITHUB_OUTPUT"
-          echo "ci_reason=fork_pull_request" >> "$GITHUB_OUTPUT"
-          echo "full_ci=true" >> "$GITHUB_OUTPUT"
-          echo "minimal_ci=true" >> "$GITHUB_OUTPUT"
-
-  quality:
+  format:
+    name: Format
     needs: quota
-    if: needs.quota.outputs.full_ci == 'true'
+    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6.7.0
         with:
           enable-cache: true
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - run: uv sync --locked --group dev
       - run: uv run ruff format --check .
+
+  lint:
+    name: Lint
+    needs: quota
+    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6.7.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev
       - run: uv run ruff check .
+
+  typecheck:
+    name: Type Check
+    needs: quota
+    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6.7.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev
       - run: uv run basedpyright
+
+  tests:
+    name: Tests
+    needs: quota
+    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6.7.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev
       - run: uv run pytest
 
   lock:
+    name: Lock
     needs: quota
-    if: needs.quota.outputs.minimal_ci == 'true'
+    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 100
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
