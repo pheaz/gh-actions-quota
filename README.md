@@ -5,6 +5,23 @@ measures GitHub Actions quota usage. It converts Actions billing discounts to
 Linux-equivalent included minutes at `$0.006/min`. Repositories—not this
 package—define their CI thresholds directly in workflow job conditions.
 
+## Installation
+
+Add the package to a dedicated CI dependency group with uv:
+
+```shell
+uv add --group ci github-actions-quota==0.1.0
+```
+
+Alternatively, install it with pip:
+
+```shell
+python -m pip install github-actions-quota==0.1.0
+```
+
+When using the uv group, run the installed console script from the locked
+environment with `uv run --locked --group ci github-actions-quota`.
+
 ## Python API
 
 ```python
@@ -71,10 +88,9 @@ jobs:
       - uses: actions/checkout@v4
       - id: quota
         env:
-          PYTHONPATH: src
           ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
           ACTIONS_QUOTA_MINUTES: ${{ vars.ACTIONS_QUOTA_MINUTES || '2000' }}
-        run: python3 -m github_actions_quota
+        run: uv run --locked --group ci github-actions-quota
 
   tests:
     needs: quota
@@ -92,3 +108,9 @@ For fail-closed gating, also include
 does. Authentication or API failures emit a warning and an unavailable result,
 but exit successfully so dependent jobs are intentionally skipped rather than
 reported as failures.
+
+## Development
+
+Install the development tools from the lockfile with
+`uv sync --locked --group dev`. From this repository checkout, run the CLI with
+`uv run github-actions-quota`.

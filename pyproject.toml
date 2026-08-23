@@ -8,7 +8,15 @@ version = "0.1.0"
 description = "Measure GitHub Actions quota usage"
 readme = "README.md"
 requires-python = ">=3.12"
+authors = [{ name = "Philipp Wallrafen" }]
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/philippwallrafen/github-actions-quota"
+Issues = "https://github.com/philippwallrafen/github-actions-quota/issues"
+Changelog = "https://github.com/philippwallrafen/github-actions-quota/releases"
 
 [project.scripts]
 github-actions-quota = "github_actions_quota.__main__:main"
