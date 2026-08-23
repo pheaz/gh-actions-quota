@@ -25,14 +25,21 @@ def test_cli_writes_usage_and_uses_repository_owner_not_actor(
     monkeypatch.setenv("ACTIONS_QUOTA_MINUTES", "3000")
     monkeypatch.setenv("GITHUB_ACTOR", "unrelated-actor")
     seen: list[tuple[str, str, str | None]] = []
-    monkeypatch.setattr(command, "fetch_owner_type", lambda _owner, _token: "user")
-    monkeypatch.setattr(
-        command,
-        "fetch_used_minutes",
-        lambda owner, token, *, owner_type=None: (
-            seen.append((owner, token, owner_type)) or Decimal("1200")
-        ),
-    )
+
+    def fake_owner_type(_owner: str, _token: str) -> str:
+        return "user"
+
+    def fake_used_minutes(
+        owner: str,
+        token: str,
+        *,
+        owner_type: str | None = None,
+    ) -> Decimal:
+        seen.append((owner, token, owner_type))
+        return Decimal("1200")
+
+    monkeypatch.setattr(command, "fetch_owner_type", fake_owner_type)
+    monkeypatch.setattr(command, "fetch_used_minutes", fake_used_minutes)
     assert command.main() == 0
     assert output.read_text().splitlines() == [
         "usage_available=true",
@@ -50,12 +57,21 @@ def test_default_quota_and_api_failure_fail_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     output, _ = _configure(monkeypatch, tmp_path)
-    monkeypatch.setattr(command, "fetch_owner_type", lambda _owner, _token: "user")
-    monkeypatch.setattr(
-        command,
-        "fetch_used_minutes",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("down")),
-    )
+
+    def fake_owner_type(_owner: str, _token: str) -> str:
+        return "user"
+
+    def fake_used_minutes(
+        _owner: str,
+        _token: str,
+        *,
+        owner_type: str | None = None,
+    ) -> Decimal:
+        del owner_type
+        raise OSError("down")
+
+    monkeypatch.setattr(command, "fetch_owner_type", fake_owner_type)
+    monkeypatch.setattr(command, "fetch_used_minutes", fake_used_minutes)
     assert command.main() == 0
     assert output.read_text().splitlines() == [
         "usage_available=false",
@@ -80,12 +96,21 @@ def test_local_uses_gh_for_token_and_owner(
         return subprocess.CompletedProcess(args, 0, value, "")
 
     monkeypatch.setattr(command.subprocess, "run", run)
-    monkeypatch.setattr(
-        command, "fetch_owner_type", lambda _owner, _token: "organization"
-    )
-    monkeypatch.setattr(
-        command, "fetch_used_minutes", lambda *_args, **_kwargs: Decimal(1)
-    )
+
+    def fake_owner_type(_owner: str, _token: str) -> str:
+        return "organization"
+
+    def fake_used_minutes(
+        _owner: str,
+        _token: str,
+        *,
+        owner_type: str | None = None,
+    ) -> Decimal:
+        del owner_type
+        return Decimal(1)
+
+    monkeypatch.setattr(command, "fetch_owner_type", fake_owner_type)
+    monkeypatch.setattr(command, "fetch_used_minutes", fake_used_minutes)
     assert command.main() == 0
     assert calls == [
         ["gh", "repo", "view", "--json", "owner", "--jq", ".owner.login"],
@@ -107,11 +132,17 @@ def test_public_actions_repository_is_unmetered_without_token(
         )
     )
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
-    monkeypatch.setattr(
-        command,
-        "fetch_used_minutes",
-        lambda *_args, **_kwargs: pytest.fail("API called"),
-    )
+
+    def fail_used_minutes(
+        _owner: str,
+        _token: str,
+        *,
+        owner_type: str | None = None,
+    ) -> Decimal:
+        del owner_type
+        pytest.fail("API called")
+
+    monkeypatch.setattr(command, "fetch_used_minutes", fail_used_minutes)
     assert command.main() == 0
     assert "usage_available=true" in output.read_text()
     assert "usage_percent=0" in output.read_text()

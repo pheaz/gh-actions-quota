@@ -89,13 +89,19 @@ def _public_actions_context() -> str | None:
     if event_path:
         with Path(event_path).open(encoding="utf-8") as event_file:
             event = cast("dict[str, object]", json.load(event_file))
-        repository = event.get("repository")
-        if isinstance(repository, dict):
+        repository_candidate = event.get("repository")
+        if isinstance(repository_candidate, dict):
+            repository = cast("dict[str, object]", repository_candidate)
+
             if repository.get("private") is False:
                 visibility = "public"
-            owner = repository.get("owner")
-            if isinstance(owner, dict) and isinstance(owner.get("type"), str):
-                owner_type = cast("str", owner["type"]).lower()
+
+            owner_candidate = repository.get("owner")
+            if isinstance(owner_candidate, dict):
+                owner = cast("dict[str, object]", owner_candidate)
+                owner_type_candidate = owner.get("type")
+                if isinstance(owner_type_candidate, str):
+                    owner_type = owner_type_candidate.lower()
     return owner_type if visibility == "public" else None
 
 
