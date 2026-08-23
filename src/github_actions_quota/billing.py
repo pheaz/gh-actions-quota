@@ -63,7 +63,9 @@ def fetch_used_minutes(
     opener: HttpOpener | None = None,
 ) -> Decimal:
     """Fetch the repository owner's current Actions billing usage."""
-    selected_opener = opener or urllib.request.build_opener()
+    selected_opener: HttpOpener = opener or cast(
+        "HttpOpener", urllib.request.build_opener()
+    )
     resolved_type = owner_type or fetch_owner_type(owner, token, opener=selected_opener)
     current_time = now or datetime.now(UTC)
     query = urllib.parse.urlencode(
@@ -91,7 +93,9 @@ def fetch_owner_type(
     owner: str, token: str, *, opener: HttpOpener | None = None
 ) -> str:
     """Resolve a GitHub login to ``user`` or ``organization`` explicitly."""
-    selected_opener = opener or urllib.request.build_opener()
+    selected_opener: HttpOpener = opener or cast(
+        "HttpOpener", urllib.request.build_opener()
+    )
     owner_path = urllib.parse.quote(owner, safe="")
     response = selected_opener.open(
         _request(f"https://api.github.com/users/{owner_path}", token)
