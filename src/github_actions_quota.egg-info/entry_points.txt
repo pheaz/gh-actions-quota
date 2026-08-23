@@ -1,2 +1,0 @@
-[console_scripts]
-github-actions-quota = github_actions_quota.__main__:main
