@@ -3,9 +3,8 @@ export const LINUX_MINUTE_PRICE_USD = 0.006;
 export const DEFAULT_THRESHOLD_PERCENT = 50;
 export const ACTIONS_QUOTA_SECRET = "ACTIONS_QUOTA_TOKEN";
 
-// Set this once the public GitHub App is registered. Until then, setup can be
-// tested with GITHUB_ACTIONS_QUOTA_CLIENT_ID in the environment.
-export const DEFAULT_GITHUB_APP_CLIENT_ID = "";
+// Public Client ID of the actions-quota GitHub App. Client IDs are not secrets.
+export const DEFAULT_GITHUB_APP_CLIENT_ID = "Iv23liXk29OIBFBTJjap";
 
 export const INCLUDED_MINUTES_BY_PLAN = Object.freeze({
   free: 2000,
