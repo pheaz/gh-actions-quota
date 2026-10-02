@@ -16,7 +16,7 @@ inputs:
 
 outputs:
   allowed:
-    description: "true" while usage is below the configured threshold; otherwise "false".
+    description: '"true" while usage is below the configured threshold; otherwise "false".'
   usage-available:
     description: Whether current billing usage could be determined.
   used-minutes:
