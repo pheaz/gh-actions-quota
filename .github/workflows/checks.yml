@@ -59,7 +59,12 @@ jobs:
       - run: go build ./cmd/gh-actions-quota
       - name: Check Go formatting
         shell: bash
-        run: test -z "$(gofmt -l cmd internal)"
+        run: |
+          files="$(gofmt -l cmd internal)"
+          if [[ -n "$files" ]]; then
+            printf '%s\n' "$files"
+            exit 1
+          fi
 
   binaries:
     runs-on: ubuntu-latest
