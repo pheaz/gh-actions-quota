@@ -27,8 +27,8 @@ test("plan names map to current included Actions minutes", () => {
 });
 
 test("fetchUsedMinutes chooses the user billing endpoint", async () => {
-  let seenUrl;
-  const fetchImpl = async (url) => {
+  let seenUrl: string | undefined;
+  const fetchImpl: typeof fetch = async (url) => {
     seenUrl = String(url);
     return new Response(
       JSON.stringify({
@@ -60,6 +60,32 @@ test("fetchPlan rejects a token for a different personal account", async () => {
 
   await assert.rejects(
     () => fetchPlan("owner", "user", "token", fetchImpl),
-    /does not own|not owner|not owner/i,
+    /repository owner/i,
   );
+});
+
+test("Enterprise Cloud and normalized plan names", () => {
+  assert.equal(includedMinutesForPlan(" enterprise cloud "), 50000);
+  assert.equal(includedMinutesForPlan("PRO"), 3000);
+});
+
+test("billing only includes minute discounts, including an empty month", () => {
+  assert.equal(parseUsedMinutes({ usageItems: [] }), 0);
+  assert.equal(parseUsedMinutes({ usageItems: [
+    { product: "Actions", unitType: "minutes", discountAmount: 1.8, grossAmount: 900 },
+    { product: "Actions", unitType: "gigabytes", discountAmount: 50 },
+  ] }), 300);
+});
+
+for (const payload of [null, [], {}, { usageItems: {} }, { usageItems: [null] },
+  { usageItems: [{ product: "Actions", unitType: "minutes", discountAmount: "6" }] },
+  { usageItems: [{ product: "Actions", unitType: "minutes", discountAmount: -1 }] }]) {
+  test(`reject invalid billing data ${JSON.stringify(payload)}`, () => {
+    assert.throws(() => parseUsedMinutes(payload));
+  });
+}
+
+test("network failure emits a sanitized error", async () => {
+  const fetchImpl: typeof fetch = async () => { throw new Error("test-only-token transport dump"); };
+  await assert.rejects(() => fetchUsedMinutes("owner", "test-only-token", { ownerType: "user", fetchImpl }), /^Error: GitHub API request failed$/);
 });
