@@ -4,7 +4,7 @@ author: Philipp Wallrafen
 
 inputs:
   token:
-    description: Repository secret created by `npx github-actions-quota setup`.
+    description: Repository secret created by `gh actions-quota setup`.
     required: false
   threshold:
     description: Stop allowing gated jobs once usage reaches this percentage.
@@ -36,7 +36,7 @@ outputs:
 
 runs:
   using: node24
-  main: src/action.js
+  main: dist/index.js
 
 branding:
   icon: activity

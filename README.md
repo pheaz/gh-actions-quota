@@ -1,10 +1,33 @@
-# github-actions-quota
+# gh-actions-quota
 
-`github-actions-quota` is a public GitHub Action that lets expensive CI jobs run only while the repository owner's included GitHub Actions quota is below a chosen threshold.
+One repository ships a **GitHub Action** to gate expensive CI jobs and a native
+**GitHub CLI extension** to configure its billing token. Both share the same
+release version.
 
-The action is read-only. It does not disable workflows, modify repositories, or require repository write permissions.
+## Setup
 
-## What it looks like
+Install [GitHub CLI](https://cli.github.com/) and authenticate with
+`gh auth login`. Then run these commands from the repository that will use the action:
+
+```shell
+gh extension install philippwallrafen/gh-actions-quota
+gh actions-quota setup
+```
+
+Setup opens GitHub's device authorization page and displays a code. Authorize as
+the **personal account that owns the current repository**. The extension checks
+the account identity, plan and billing access, then saves the token as the
+repository secret **`ACTIONS_QUOTA_TOKEN`** using your existing local `gh` login.
+
+The project never saves the token to a local file, passes it in command arguments
+or prints it. It remains in memory and is piped to `gh secret set` through stdin.
+There is no server, central token store or telemetry. `gh` is only needed for
+setup; workflow users need no additional runtime or installation step.
+
+Organization-owned repositories are **not supported for metered billing in v1**.
+Public repositories using standard GitHub-hosted runners need no setup or token.
+
+## Workflow
 
 ```yaml
 name: CI
@@ -13,13 +36,16 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   quota:
     runs-on: ubuntu-latest
     outputs:
       allowed: ${{ steps.quota.outputs.allowed }}
     steps:
-      - uses: philippwallrafen/github-actions-quota@v1
+      - uses: philippwallrafen/gh-actions-quota@v1
         id: quota
         with:
           token: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
@@ -34,67 +60,62 @@ jobs:
       - run: swift test
 ```
 
-At 49.9% usage, `allowed` is `true`. At 50% or above, it is `false` and the gated job is skipped.
+Usage below the threshold gives `allowed=true`. **Exactly at the threshold or
+above it, `allowed=false`.** The default threshold is `50` percent. Billing
+belongs to `GITHUB_REPOSITORY_OWNER`, never the actor or pull request author.
 
-The repository owner is detected automatically from `GITHUB_REPOSITORY_OWNER`. The actor who pushed or opened a pull request does not affect whose quota is measured.
+Authentication, billing, API or invalid-input failures fail closed: the action
+emits a warning, sets `usage-available=false` and `allowed=false`, and finishes
+successfully so gated jobs are skipped. Pull requests without access to the
+repository secret also fail closed in private repositories.
 
-## One-time setup
+## GitHub App and security
 
-Run this from the repository that will use the action:
+The **actions-quota** GitHub App uses:
 
-```shell
-npx github-actions-quota setup
-```
+| Setting | Value |
+| --- | --- |
+| Public Client ID | `Iv23liXk29OIBFBTJjap` |
+| Account permission | **Plan: Read-only** |
+| Repository permissions | None |
+| Organization permissions | None in v1 |
+| Device Flow | Enabled |
+| User-to-server token expiration | Disabled |
+| Client secret | Not used |
+| Homepage | https://github.com/philippwallrafen/gh-actions-quota |
 
-The CLI:
+The app token only reads the personal account's plan and billing. The app does
+not request `Secrets: write`. Only the locally authenticated `gh` process writes
+the repository secret. The action subsequently reads that secret; it does not
+write repository settings. Expiring tokens and refresh-token responses are
+rejected because this design does not store or refresh credentials locally.
 
-1. Detects the current GitHub repository with `gh`.
-2. Starts the GitHub App device authorization flow.
-3. Opens GitHub and asks the owner to authorize read-only account-plan access.
-4. Receives a non-expiring GitHub App user access token.
-5. Validates that the token belongs to the repository owner and can read Actions billing usage.
-6. Pipes the token directly into `gh secret set ACTIONS_QUOTA_TOKEN` for the current repository.
+Re-run setup to replace a revoked token. Authorization can be revoked in your
+GitHub account's authorized GitHub Apps settings.
 
-The token is never written to a local file by `github-actions-quota`.
+See GitHub's [device-flow documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
+and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage).
 
-`gh` must already be installed and authenticated because the setup command uses the user's existing local GitHub login only to write the repository secret. The long-lived `ACTIONS_QUOTA_TOKEN` itself has only the GitHub App's read-only account permissions.
+## Quota calculation
 
-### GitHub App
+The action reads the current **UTC calendar month's** Actions billing summary
+for the repository owner's account. It sums `discountAmount` only for
+`product=Actions` and `unitType=minutes`, then divides by **`$0.006/min`** to
+calculate Linux-equivalent included minutes. Other products and storage usage
+are excluded. Usage is account-wide, including other repositories owned by the
+same account. Billing data may arrive with a delay, so this is a gate based on
+reported usage rather than a real-time spending limit.
 
-The setup CLI uses the public **actions-quota** GitHub App, configured with:
-
-- **Account permission:** Plan — read-only
-- **Device Flow:** enabled
-- **User access token expiration:** disabled
-
-Its public Client ID is embedded in `src/constants.js`. No client secret is needed by the device flow and no GitHub App secret is committed to this repository.
-
-For development, the client ID can be overridden without modifying source:
-
-```shell
-GITHUB_ACTIONS_QUOTA_CLIENT_ID=Iv1.example \
-  node src/cli.js setup
-```
-
-Automatic setup currently targets repositories owned by personal GitHub accounts. The billing library keeps the user/organization endpoint split, but organization authorization needs separate organization permissions and is intentionally not requested by the v1 GitHub App.
-
-## How quota is measured
-
-GitHub's billing API reports discounts in dollars even when included Actions usage came from runners with different minute prices. The action converts the Actions `discountAmount` back to Linux 2-core equivalent included minutes at `$0.006/min`.
-
-That preserves GitHub's runner multipliers: a macOS minute consumes more of the included allowance than a standard Linux minute.
-
-The included monthly allowance is detected from the account plan:
-
-| Plan | Included Actions minutes |
+| Plan | Included monthly minutes |
 | --- | ---: |
-| GitHub Free | 2,000 |
-| GitHub Pro | 3,000 |
-| GitHub Free for organizations | 2,000 |
-| GitHub Team | 3,000 |
-| GitHub Enterprise Cloud | 50,000 |
+| Free | 2,000 |
+| Pro | 3,000 |
+| Team | 3,000 |
+| Enterprise Cloud | 50,000 |
 
-For unusual or legacy plans, pass an explicit override:
+Team and Enterprise mappings are retained; organization billing is not enabled
+by those mappings in v1. For an unusual or legacy personal plan, override the
+allowance explicitly:
 
 ```yaml
 with:
@@ -103,48 +124,96 @@ with:
   quota-minutes: 3000
 ```
 
+`token` also falls back to the `ACTIONS_QUOTA_TOKEN` environment variable.
+
 ## Outputs
 
-The action exposes:
+| Output | Meaning |
+| --- | --- |
+| `allowed` | `true` below the threshold; `false` at/above it or on failure |
+| `usage-available` | Whether usage was determined successfully |
+| `used-minutes` | Linux-equivalent included minutes consumed |
+| `quota-minutes` | Detected or overridden monthly allowance |
+| `remaining-minutes` | Remaining minutes, with a minimum of zero |
+| `usage-percent` | Percent of included allowance consumed |
+| `billing-owner` | Repository owner whose quota is charged |
+| `billing-owner-type` | `user`; `unmetered` for public repos; `unavailable` on failure |
+| `unmetered` | `true` for the public-repository shortcut |
 
-- `allowed` — `true` below the threshold, otherwise `false`
-- `usage-available` — whether billing usage was successfully read
-- `used-minutes` — Linux-equivalent included minutes consumed
-- `quota-minutes` — detected or configured allowance
-- `remaining-minutes` — included minutes remaining
-- `usage-percent` — percent of the included allowance consumed
-- `billing-owner` — repository owner whose quota is charged
-- `billing-owner-type` — `user` or `organization`
-- `unmetered` — `true` for public repositories using the normal public-repository path
+For public repositories, standard GitHub-hosted runners are unmetered:
+`allowed=true`, `usage-available=true`, `used-minutes=0`, `usage-percent=0`,
+`quota-minutes=unmetered` and `remaining-minutes=unmetered`. Larger runners are
+separately billed and are outside this shortcut; do not use it as a gate for
+larger-runner spending.
 
-Billing/API/authentication failures are **fail-closed**: the action sets `allowed=false` instead of allowing an expensive job to run with unknown quota state.
+In private repositories, the small quota job **consumes runner time itself**.
+Use a cheap Linux job to gate expensive jobs. The action cannot prevent its own
+job from starting.
 
-## Public repositories
+## Development
 
-For public repositories, standard GitHub-hosted runners are unmetered. The action therefore returns `allowed=true` without requiring `ACTIONS_QUOTA_TOKEN` when the workflow event identifies the repository as public.
+The action uses strict TypeScript and esbuild, targeting Node.js 24. Its complete
+bundle is committed at `dist/index.js`; `action.yml` runs it with `node24`.
+Node.js and the JavaScript package manager are development/build tools only.
+The extension uses Go 1.27.1 or newer and has no third-party Go dependencies.
 
-Larger runners are separately billed and are outside this shortcut.
-
-## Important cost detail
-
-A quota gate cannot prevent the gate itself from starting. In a private repository, the small `quota` job still consumes its Ubuntu runner time. Put the quota check in a cheap Linux job and gate expensive macOS/Windows jobs behind it.
-
-If the requirement is literally zero automatic Actions execution after a threshold, a separate external watcher must disable the workflow. That is intentionally outside this action's read-only design.
-
-## Local development
-
-Requires Node.js 20 or newer.
+After installing the locked development dependencies, validate the action with:
 
 ```shell
-npm ci
-npm test
-npm run check
+node --run typecheck
+node --run test
+node --run build
+git diff --exit-code -- dist/
 ```
 
-There are no runtime npm dependencies.
+Validate and build the extension:
 
-## Publishing
+```shell
+go vet ./...
+go test -race ./...
+go build ./cmd/gh-actions-quota
+bash scripts/build-release.sh v1.0.0
+```
 
-`publish.yml` uses npm trusted publishing (OIDC), so normal releases do not need a long-lived npm publish token. The npm package must be created once and configured to trust this repository's `publish.yml` workflow before automated publishing can start.
+For local extension testing, build the executable at the repository root:
 
-Release tags should expose a stable major tag for Actions consumers, for example `v1` pointing at the current `v1.x.x` release.
+```shell
+go build -o gh-actions-quota ./cmd/gh-actions-quota
+gh extension install .
+```
+
+On Windows, name the local executable `gh-actions-quota.exe`. Tests use mocked
+GitHub responses and deliberately fake tokens; they do not authorize the app or
+write real repository secrets.
+
+## Releases
+
+`v1.0.0` versions the action and extension together. The tag contains TypeScript
+source, `dist/index.js`, `action.yml` and Go source. The GitHub Release contains
+five standalone binaries and `checksums.txt`:
+
+- `darwin/arm64`
+- `darwin/amd64`
+- `linux/amd64`
+- `linux/arm64`
+- `windows/amd64`
+
+Asset names end in the platform suffix expected by `gh extension install`, for
+example `gh-actions-quota_v1.0.0_darwin-arm64` and
+`gh-actions-quota_v1.0.0_windows-amd64.exe`. There are no archives or runtime
+dependencies for users.
+
+Before tagging, update the shared version in `package.json` and its lockfile,
+rebuild and commit `dist/index.js`, then push a matching semantic version tag.
+The release workflow repeats TypeScript checks, verifies the committed bundle,
+tests Go on Linux/macOS/Windows, cross-compiles the binaries, generates SHA256
+checksums and publishes assets with **`GITHUB_TOKEN`**. No long-term publishing
+credential is required.
+
+After a successful stable v1 release, the workflow advances the moving **`v1`**
+tag to the same commit. Prereleases do not advance it, and retries of older tags
+cannot move it backwards. Repository rules must allow the release workflow to
+create semantic version tags and update `v1`.
+
+Maintainers must configure the GitHub App settings above before the first public
+release. App registration settings are independent of repository files.
