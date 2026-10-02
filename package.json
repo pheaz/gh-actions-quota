@@ -1,0 +1,40 @@
+{
+  "name": "github-actions-quota",
+  "version": "1.0.0",
+  "description": "Gate expensive GitHub Actions jobs before they consume too much included quota",
+  "type": "module",
+  "bin": {
+    "github-actions-quota": "src/cli.js"
+  },
+  "exports": {
+    ".": "./src/usage.js",
+    "./billing": "./src/billing.js"
+  },
+  "files": [
+    "action.yml",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check src/action.js && node --check src/billing.js && node --check src/cli.js && node --check src/constants.js && node --check src/device-flow.js && node --check src/usage.js && npm test",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/philippwallrafen/github-actions-quota.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "github-actions",
+    "quota",
+    "billing",
+    "ci"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

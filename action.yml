@@ -1,0 +1,43 @@
+name: GitHub Actions Quota
+description: Gate expensive jobs based on the repository owner's included GitHub Actions quota.
+author: Philipp Wallrafen
+
+inputs:
+  token:
+    description: Repository secret created by `npx github-actions-quota setup`.
+    required: false
+  threshold:
+    description: Stop allowing gated jobs once usage reaches this percentage.
+    required: false
+    default: "50"
+  quota-minutes:
+    description: Override included monthly minutes. By default the action detects the account plan.
+    required: false
+
+outputs:
+  allowed:
+    description: '"true" while usage is below the configured threshold; otherwise "false".'
+  usage-available:
+    description: Whether current billing usage could be determined.
+  used-minutes:
+    description: Linux-equivalent included minutes consumed this billing month.
+  quota-minutes:
+    description: Included monthly Actions minutes for the billing account.
+  remaining-minutes:
+    description: Included Linux-equivalent minutes remaining.
+  usage-percent:
+    description: Percentage of included Actions quota consumed.
+  billing-owner:
+    description: Repository owner whose Actions quota is charged.
+  billing-owner-type:
+    description: user or organization.
+  unmetered:
+    description: Whether standard GitHub-hosted runners are unmetered because the repository is public.
+
+runs:
+  using: node24
+  main: src/action.js
+
+branding:
+  icon: activity
+  color: gray-dark
