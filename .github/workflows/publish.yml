@@ -1,49 +1,23 @@
-name: Publish
+name: Publish npm package
 
 on:
   release:
     types: [published]
 
-env:
-  SOURCE_DATE_EPOCH: "315532800"
-
 permissions:
   contents: read
+  id-token: write
 
 jobs:
-  build:
-    name: Build distribution
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-      - run: uv build
-      - name: Smoke-test wheel
-        run: |
-          python3 -m venv /tmp/github-actions-quota-smoke
-          /tmp/github-actions-quota-smoke/bin/python -m pip install dist/*.whl
-          cd /tmp
-          /tmp/github-actions-quota-smoke/bin/python -c \
-            'from github_actions_quota import QuotaUsage, calculate_usage; import github_actions_quota'
-          GITHUB_ACTIONS=true \
-            GITHUB_REPOSITORY_VISIBILITY=public \
-            GITHUB_REPOSITORY_OWNER=philippwallrafen \
-            /tmp/github-actions-quota-smoke/bin/github-actions-quota
-      - uses: actions/upload-artifact@v4
-        with:
-          name: python-distributions
-          path: dist/
-
   publish:
-    name: Publish to PyPI
-    needs: build
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          name: python-distributions
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check
+      - run: npm publish

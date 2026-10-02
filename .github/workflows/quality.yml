@@ -4,107 +4,32 @@ on:
   push:
   pull_request:
 
-env:
-  SOURCE_DATE_EPOCH: "315532800"
+permissions:
+  contents: read
 
 jobs:
-  quota:
-    name: Actions quota
+  test:
     runs-on: ubuntu-latest
-    outputs:
-      usage_available: ${{ steps.quota.outputs.usage_available }}
-      usage_percent: ${{ steps.quota.outputs.usage_percent }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Measure Actions quota
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check
+      - run: npm pack --dry-run
+
+      - name: Smoke-test the action in its public repository
         id: quota
+        uses: ./
+        with:
+          threshold: 50
+
+      - name: Verify public-repository result
         env:
-          PYTHONPATH: src
-          ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
-          ACTIONS_QUOTA_MINUTES: ${{ vars.ACTIONS_QUOTA_MINUTES || '2000' }}
-        run: python3 -m github_actions_quota
-
-  format:
-    name: Format
-    needs: quota
-    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-        with:
-          enable-cache: true
-      - run: uv sync --locked --group dev
-      - run: uv run ruff format --check .
-
-  lint:
-    name: Lint
-    needs: quota
-    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-        with:
-          enable-cache: true
-      - run: uv sync --locked --group dev
-      - run: uv run ruff check .
-
-  typecheck:
-    name: Type Check
-    needs: quota
-    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-        with:
-          enable-cache: true
-      - run: uv sync --locked --group dev
-      - run: uv run basedpyright
-
-  tests:
-    name: Tests
-    needs: quota
-    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-        with:
-          enable-cache: true
-      - run: uv sync --locked --group dev
-      - run: uv run pytest
-
-  build:
-    name: Build
-    needs: quota
-    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 50
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-        with:
-          enable-cache: true
-      - run: uv build
-      - name: Smoke-test wheel
+          ALLOWED: ${{ steps.quota.outputs.allowed }}
+          UNMETERED: ${{ steps.quota.outputs.unmetered }}
         run: |
-          python3 -m venv /tmp/github-actions-quota-smoke
-          /tmp/github-actions-quota-smoke/bin/python -m pip install dist/*.whl
-          cd /tmp
-          /tmp/github-actions-quota-smoke/bin/python -c \
-            'from github_actions_quota import QuotaUsage, calculate_usage; import github_actions_quota'
-          GITHUB_ACTIONS=true \
-            GITHUB_REPOSITORY_VISIBILITY=public \
-            GITHUB_REPOSITORY_OWNER=philippwallrafen \
-            /tmp/github-actions-quota-smoke/bin/github-actions-quota
-
-  lock:
-    name: Lock
-    needs: quota
-    if: needs.quota.outputs.usage_available == 'true' && needs.quota.outputs.usage_percent < 100
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6.7.0
-      - run: uv lock --check
+          test "$ALLOWED" = "true"
+          test "$UNMETERED" = "true"
