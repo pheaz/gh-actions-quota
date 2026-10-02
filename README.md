@@ -59,19 +59,17 @@ The token is never written to a local file by `github-actions-quota`.
 
 `gh` must already be installed and authenticated because the setup command uses the user's existing local GitHub login only to write the repository secret. The long-lived `ACTIONS_QUOTA_TOKEN` itself has only the GitHub App's read-only account permissions.
 
-### GitHub App bootstrap status
+### GitHub App
 
-The repository code implements the complete device-flow setup, but the public GitHub App still needs to be registered once by the project maintainer before the first public release.
-
-The app must be configured with:
+The setup CLI uses the public **actions-quota** GitHub App, configured with:
 
 - **Account permission:** Plan — read-only
 - **Device Flow:** enabled
 - **User access token expiration:** disabled
 
-After registration, put its public Client ID in `DEFAULT_GITHUB_APP_CLIENT_ID` in `src/constants.js`. No client secret is needed by the device flow and no secret is committed to this repository.
+Its public Client ID is embedded in `src/constants.js`. No client secret is needed by the device flow and no GitHub App secret is committed to this repository.
 
-During development the client ID can instead be supplied without modifying source:
+For development, the client ID can be overridden without modifying source:
 
 ```shell
 GITHUB_ACTIONS_QUOTA_CLIENT_ID=Iv1.example \
