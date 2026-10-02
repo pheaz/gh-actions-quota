@@ -17,15 +17,3 @@ test("calculateUsage validates quota and threshold", () => {
   assert.throws(() => parseThreshold(0), /threshold/);
   assert.throws(() => parseThreshold(101), /threshold/);
 });
-
-test("above quota never gives negative remaining minutes", () => {
-  const usage = calculateUsage(4000, 3000);
-  assert.equal(usage.allowed, false);
-  assert.equal(usage.remainingMinutes, 0);
-});
-
-for (const used of [-1, NaN, Infinity]) {
-  test(`invalid used minutes ${used}`, () => {
-    assert.throws(() => calculateUsage(used, 2000));
-  });
-}

@@ -1,6 +1,6 @@
 import { DEFAULT_THRESHOLD_PERCENT } from "./constants.js";
 
-export function parsePositiveNumber(value: string | number, label: string): number {
+export function parsePositiveNumber(value, label) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) {
     throw new Error(`${label} must be positive and finite`);
@@ -8,7 +8,7 @@ export function parsePositiveNumber(value: string | number, label: string): numb
   return number;
 }
 
-export function parseThreshold(value: string | number = DEFAULT_THRESHOLD_PERCENT): number {
+export function parseThreshold(value = DEFAULT_THRESHOLD_PERCENT) {
   const threshold = Number(value);
   if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 100) {
     throw new Error("threshold must be greater than 0 and at most 100");
@@ -17,8 +17,8 @@ export function parseThreshold(value: string | number = DEFAULT_THRESHOLD_PERCEN
 }
 
 export function calculateUsage(
-  usedMinutes: number,
-  quotaMinutes: number,
+  usedMinutes,
+  quotaMinutes,
   threshold = DEFAULT_THRESHOLD_PERCENT,
 ) {
   const used = Number(usedMinutes);
