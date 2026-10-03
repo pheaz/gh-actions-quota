@@ -1,0 +1,84 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        Do not include access tokens, repository secrets or other credentials.
+        Security vulnerabilities should be reported privately according to SECURITY.md.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `gh actions-quota --version`, or the Action tag/SHA being used.
+      placeholder: v1.x.x
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - GitHub CLI extension
+        - GitHub Action
+        - Setup workflow generation
+        - Release/install process
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Required for CLI-related bugs.
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Remove tokens, secrets and private repository information before posting.
+      render: shell
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Sensitive information
+      options:
+        - label: I confirmed that this report contains no tokens, secrets or credentials.
+          required: true
