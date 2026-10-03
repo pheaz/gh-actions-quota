@@ -14,14 +14,32 @@ gh extension install philippwallrafen/gh-actions-quota
 gh actions-quota setup
 ```
 
-Setup opens GitHub's device authorization page and displays a code. Authorize as
-the **personal account that owns the current repository**. The extension checks
-the account identity, plan and billing access, then saves the token as the
-repository secret **`ACTIONS_QUOTA_TOKEN`** using your existing local `gh` login.
-It also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable workflow
-that wraps the quota action with a default threshold of 50 percent. Re-running
-setup leaves an identical generated file unchanged; if that path contains a
-modified workflow, setup refuses to overwrite it.
+Use `--init` when you also want setup to scan existing workflow files and ask
+which ones should receive the reusable quota caller:
+
+```shell
+gh actions-quota setup --init
+```
+
+Setup opens GitHub's device authorization page and displays a code. When a
+supported clipboard command is available, the device code is copied to the
+clipboard before the browser opens; otherwise setup simply prints the code.
+Authorize as the **personal account that owns the current repository**. The
+extension checks the account identity, plan and billing access, then saves the
+token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using your existing local
+`gh` login.
+
+Setup also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable
+workflow that wraps the quota action with a default threshold of 50 percent.
+Re-running setup leaves an identical generated file unchanged; if that path
+contains a modified workflow, setup refuses to overwrite it.
+
+With `--init`, setup additionally scans `.github/workflows/*.yml` and
+`.github/workflows/*.yaml` (excluding the generated helper) and asks for each
+file whether to insert a `quota` caller job. Existing callers are detected and
+left unchanged. A pre-existing different `jobs.quota` is never overwritten.
+The initializer deliberately does not guess which existing jobs are expensive;
+add `needs: quota` and the `allowed` condition to the jobs you want to gate.
 
 The project never saves the token to a local file, passes it in command arguments
 or prints it. It remains in memory and is piped to `gh secret set` through stdin.

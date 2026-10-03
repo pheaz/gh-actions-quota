@@ -20,20 +20,32 @@ const secretName = "ACTIONS_QUOTA_TOKEN"
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
 
 // Run authorizes the app, writes the repository secret, and installs the reusable quota workflow.
-func Run(ctx context.Context, output io.Writer) error {
+func Run(ctx context.Context, input io.Reader, output io.Writer, initialize bool) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return errors.New("could not resolve the current working directory")
 	}
-	return (&setup{gh: ghRunner{}, client: newClient(), output: output, browser: openBrowser, root: root}).run(ctx)
+	return (&setup{
+		gh:         ghRunner{},
+		client:     newClient(),
+		input:      input,
+		output:     output,
+		browser:    openBrowser,
+		clipboard:  copyToClipboard,
+		root:       root,
+		initialize: initialize,
+	}).run(ctx)
 }
 
 type setup struct {
-	gh      runner
-	client  *client
-	output  io.Writer
-	browser func(context.Context, string) error
-	root    string
+	gh         runner
+	client     *client
+	input      io.Reader
+	output     io.Writer
+	browser    func(context.Context, string) error
+	clipboard  func(context.Context, string) error
+	root       string
+	initialize bool
 }
 
 func (s *setup) run(ctx context.Context) error {
@@ -82,7 +94,17 @@ func (s *setup) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(s.output, "\nOpen: %s\nCode: %s\n", device.VerificationURI, device.UserCode)
+
+	clipboardCtx, clipboardCancel := context.WithTimeout(ctx, 2*time.Second)
+	copied := s.clipboard != nil && s.clipboard(clipboardCtx, device.UserCode) == nil
+	clipboardCancel()
+	fmt.Fprintf(s.output, "\nOpen: %s\n", device.VerificationURI)
+	if copied {
+		fmt.Fprintf(s.output, "Code copied to clipboard: %s\n", device.UserCode)
+	} else {
+		fmt.Fprintf(s.output, "Code: %s\n", device.UserCode)
+	}
+
 	browserCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	if s.browser(browserCtx, device.VerificationURI) != nil {
 		fmt.Fprintln(s.output, "Open the URL in your browser to continue.")
@@ -106,18 +128,20 @@ func (s *setup) run(ctx context.Context) error {
 		return errors.New("could not store ACTIONS_QUOTA_TOKEN; check your local gh login and repository secret write access, then run setup again")
 	}
 	fmt.Fprintf(s.output, "\nPlan: %s\nActions usage: %.2f / %d Linux-equivalent minutes\nStored repository secret: %s\n", plan, used, quota, secretName)
+
+	if s.initialize {
+		if err := initializeWorkflows(s.root, s.input, s.output); err != nil {
+			return err
+		}
+	}
+
 	fmt.Fprintln(s.output, `
-Call the reusable quota workflow from each workflow you want to gate:
-
-quota:
-  uses: ./.github/workflows/gh-actions-quota.yml
-  secrets:
-    ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
-
-Then gate expensive jobs with:
+Gate each expensive job with:
 
 needs: quota
-if: needs.quota.outputs.allowed == 'true'`)
+if: needs.quota.outputs.allowed == 'true'
+
+Run "gh actions-quota setup --init" to interactively add the quota caller to existing workflow files.`)
 	return nil
 }
 

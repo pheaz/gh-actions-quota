@@ -55,3 +55,32 @@ func openBrowser(ctx context.Context, uri string) error {
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	return cmd.Run()
 }
+
+func copyToClipboard(ctx context.Context, text string) error {
+	var commands [][]string
+	switch runtime.GOOS {
+	case "darwin":
+		commands = [][]string{{"pbcopy"}}
+	case "windows":
+		commands = [][]string{{"clip.exe"}}
+	default:
+		commands = [][]string{
+			{"wl-copy"},
+			{"xclip", "-selection", "clipboard"},
+			{"xsel", "--clipboard", "--input"},
+		}
+	}
+
+	for _, command := range commands {
+		if _, err := exec.LookPath(command[0]); err != nil {
+			continue
+		}
+		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	return errors.New("clipboard unavailable")
+}
