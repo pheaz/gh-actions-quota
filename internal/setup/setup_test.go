@@ -131,14 +131,19 @@ func TestOrganizationRejectedBeforeDeviceFlow(t *testing.T) {
 func TestPublicRepositorySkipsAuthorizationAndSecretWrite(t *testing.T) {
 	gh := &fakeGH{public: true, ownerType: "Organization"}
 	s, output, requests := setupFixture(t, gh, validAccount, 0)
+	s.browser = func(context.Context, string) error { t.Fatal("public setup opened browser"); return nil }
+	s.clipboard = func(context.Context, string) error { t.Fatal("public setup wrote clipboard"); return nil }
 	if err := s.run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if *requests != 0 {
 		t.Fatalf("public repository unexpectedly used device or billing API: %d requests", *requests)
 	}
-	if len(gh.calls) != 3 {
-		t.Fatalf("expected only gh version, auth status and repo lookup, got %d calls", len(gh.calls))
+	if !reflect.DeepEqual(gh.calls, []ghCall{
+		{args: []string{"--version"}},
+		{args: []string{"repo", "view", "--json", "nameWithOwner,url,isPrivate"}},
+	}) {
+		t.Fatalf("unexpected public setup gh calls: %v", gh.calls)
 	}
 	for _, call := range gh.calls {
 		if len(call.args) > 0 && (call.args[0] == "api" || call.args[0] == "secret") {

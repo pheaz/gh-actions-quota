@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const workflowPath = ".github/workflows/gh-actions-quota.yml"
@@ -59,33 +58,12 @@ jobs:
           threshold: ${{ inputs.threshold }}
 `
 
-// Match the previous generated template exactly; customized files remain protected.
-var legacyReusableWorkflow = strings.NewReplacer(
-	"ACTIONS_QUOTA_TOKEN:\n        required: false", "ACTIONS_QUOTA_TOKEN:\n        required: true",
-	"name: gh-actions-quota\n\non:", "name: GitHub Actions quota\n\non:",
-	"jobs.gh-actions-quota.outputs", "jobs.quota.outputs",
-	"  gh-actions-quota:\n", "  quota:\n",
-	"    name: gh-actions-quota", "    name: CI quota control",
-	"steps.gh-actions-quota.outputs", "steps.quota.outputs",
-	"id: gh-actions-quota", "id: quota",
-).Replace(reusableWorkflow)
-
 func ensureReusableWorkflow(root string) (bool, error) {
 	path := filepath.Join(root, filepath.FromSlash(workflowPath))
 	existing, err := os.ReadFile(path)
 	if err == nil {
 		if string(existing) == reusableWorkflow {
 			return false, nil
-		}
-		if string(existing) == legacyReusableWorkflow {
-			info, err := os.Stat(path)
-			if err != nil {
-				return false, fmt.Errorf("could not inspect %s", workflowPath)
-			}
-			if err := os.WriteFile(path, []byte(reusableWorkflow), info.Mode().Perm()); err != nil {
-				return false, fmt.Errorf("could not migrate %s", workflowPath)
-			}
-			return true, nil
 		}
 		return false, fmt.Errorf("%s already exists and differs from the generated template; reconcile or remove it before running setup again", workflowPath)
 	}

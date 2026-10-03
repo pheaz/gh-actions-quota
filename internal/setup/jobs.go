@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,18 +19,19 @@ const thresholdComment = "Quota threshold (%%): change %s below to adjust this j
 
 type jobChoice struct {
 	path, id, caller, threshold, original string
-	selected, legacy                      bool
+	selected                              bool
 	disabled                              string
 }
 
 type workflowDocument struct {
-	text             string
-	lines            []string
-	jobs             *yaml.Node
-	caller           string
-	threshold        string
-	dynamicThreshold bool
+	text     string
+	lines    []string
+	jobs     *yaml.Node
+	jobsLine int
+	caller   string
 }
+
+var errNoJobs = errors.New("workflow has no top-level jobs: key")
 
 func mappingValue(node *yaml.Node, name string) (*yaml.Node, *yaml.Node) {
 	if node == nil || node.Kind != yaml.MappingNode {
@@ -61,33 +61,23 @@ func parseWorkflow(text string) (*workflowDocument, error) {
 	if err := validateMappingKeys(&doc); err != nil {
 		return nil, err
 	}
-	_, jobs := mappingValue(doc.Content[0], "jobs")
-	if jobs == nil || jobs.Kind != yaml.MappingNode || jobs.Style&yaml.FlowStyle != 0 {
+	jobsKey, jobs := mappingValue(doc.Content[0], "jobs")
+	if jobs == nil {
+		return nil, errNoJobs
+	}
+	if jobs.Kind != yaml.MappingNode || jobs.Style&yaml.FlowStyle != 0 {
 		return nil, errors.New("workflow must contain a block jobs mapping")
 	}
-	w := &workflowDocument{text: text, lines: strings.Split(text, "\n"), jobs: jobs, threshold: "50"}
-	for i := 0; i < len(jobs.Content); i += 2 {
-		job := jobs.Content[i+1]
+	w := &workflowDocument{text: text, lines: strings.Split(text, "\n"), jobs: jobs, jobsLine: jobsKey.Line - 1}
+	if key, job := mappingValue(jobs, quotaJobID); key != nil {
 		_, uses := mappingValue(job, "uses")
-		if uses != nil && uses.Value == "./"+workflowPath {
-			if w.caller != "" {
-				return nil, errors.New("workflow defines multiple gh-actions-quota callers")
-			}
-			w.caller = jobs.Content[i].Value
-			_, with := mappingValue(job, "with")
-			if with != nil && with.Kind != yaml.MappingNode {
-				w.dynamicThreshold = true
-			}
-			if merge, _ := mappingValue(with, "<<"); merge != nil {
-				w.dynamicThreshold = true
-			}
-			_, threshold := mappingValue(with, "threshold")
-			if threshold != nil {
-				w.threshold = threshold.Value
-				value, err := strconv.ParseFloat(w.threshold, 64)
-				w.dynamicThreshold = w.dynamicThreshold || threshold.Kind != yaml.ScalarNode || err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > 100
-			}
+		_, secrets := mappingValue(job, "secrets")
+		if job.Kind != yaml.MappingNode || job.Style&yaml.FlowStyle != 0 || len(job.Content) != 4 || hasYAMLAnchor(job) ||
+			uses == nil || uses.Kind != yaml.ScalarNode || uses.Tag != "!!str" || uses.Value != "./"+workflowPath ||
+			secrets == nil || secrets.Kind != yaml.ScalarNode || secrets.Tag != "!!str" || secrets.Value != "inherit" {
+			return nil, errors.New("workflow already defines jobs.gh-actions-quota with different content; edit it manually")
 		}
+		w.caller = quotaJobID
 	}
 	return w, nil
 }
@@ -128,17 +118,14 @@ func unwrapExpression(value string) (string, error) {
 
 // Recognize only the whole gate or our outer AND wrapper. Never rewrite a
 // quota reference embedded in a custom boolean expression.
-func recognizeGate(expression, caller string) (threshold, original string, legacy, ok bool) {
+func recognizeGate(expression, caller string) (threshold, original string, ok bool) {
 	expression = strings.TrimSpace(expression)
 	match := regexp.MustCompile(`^needs\.` + regexp.QuoteMeta(caller) + `\.outputs\.usage_available\s*==\s*'true'\s*&&\s*fromJSON\(needs\.` + regexp.QuoteMeta(caller) + `\.outputs\.usage_percent\)\s*<\s*([0-9]+(?:\.[0-9]+)?)$`).FindStringSubmatch(expression)
 	if match != nil {
 		n, err := strconv.ParseFloat(match[1], 64)
 		if err == nil && n > 0 && n <= 100 {
-			return match[1], "", false, true
+			return match[1], "", true
 		}
-	}
-	if expression == "needs."+caller+".outputs.allowed == 'true'" {
-		return "", "", true, true
 	}
 	// The renderer always places the original expression first, with the gate
 	// enclosed in a separate pair of parentheses.
@@ -149,15 +136,15 @@ func recognizeGate(expression, caller string) (threshold, original string, legac
 			if strings.HasPrefix(rest, "&&") {
 				right := strings.TrimSpace(rest[2:])
 				if len(right) > 2 && right[0] == '(' && closingParen(right, 0) == len(right)-1 {
-					threshold, _, legacy, ok = recognizeGate(right[1:len(right)-1], caller)
+					threshold, _, ok = recognizeGate(right[1:len(right)-1], caller)
 					if ok {
-						return threshold, expression[1:end], legacy, true
+						return threshold, expression[1:end], true
 					}
 				}
 			}
 		}
 	}
-	return "", "", false, false
+	return "", "", false
 }
 
 func referencesQuota(expression, caller string) bool {
@@ -228,22 +215,6 @@ func dependencyIDs(node *yaml.Node) ([]string, error) {
 }
 
 func (w *workflowDocument) choices(path string) []jobChoice {
-	// Gating an ancestor of the quota caller would introduce a dependency cycle.
-	ancestors := make(map[string]bool)
-	var visit func(string)
-	visit = func(id string) {
-		if ancestors[id] {
-			return
-		}
-		ancestors[id] = true
-		_, job := mappingValue(w.jobs, id)
-		_, needs := mappingValue(job, "needs")
-		ids, _ := dependencyIDs(needs)
-		for _, dependency := range ids {
-			visit(dependency)
-		}
-	}
-	visit(w.caller)
 	var choices []jobChoice
 	for i := 0; i < len(w.jobs.Content); i += 2 {
 		key, job := w.jobs.Content[i], w.jobs.Content[i+1]
@@ -254,8 +225,6 @@ func (w *workflowDocument) choices(path string) []jobChoice {
 		switch {
 		case job.Kind != yaml.MappingNode || job.Style&yaml.FlowStyle != 0 || job.Anchor != "":
 			c.disabled = "flow, anchored or aliased jobs require manual editing"
-		case ancestors[c.id]:
-			c.disabled = "quota caller depends on this job"
 		default:
 			_, needs := mappingValue(job, "needs")
 			if _, err := dependencyIDs(needs); err != nil {
@@ -281,17 +250,9 @@ func (w *workflowDocument) choices(path string) []jobChoice {
 					if err != nil {
 						c.disabled = err.Error()
 					} else {
-						threshold, original, legacy, recognized := recognizeGate(expression, w.caller)
+						threshold, original, recognized := recognizeGate(expression, w.caller)
 						if recognized {
-							c.selected, c.legacy, c.original = true, legacy, original
-							if legacy {
-								c.threshold = w.threshold
-								if w.dynamicThreshold {
-									c.disabled = "dynamic caller threshold requires manual editing"
-								}
-							} else {
-								c.threshold = threshold
-							}
+							c.selected, c.original, c.threshold = true, original, threshold
 						} else if referencesQuota(expression, w.caller) {
 							c.disabled = "custom quota expression requires manual editing"
 						} else {
@@ -500,11 +461,11 @@ func (w *workflowDocument) gateEdits(choice jobChoice) ([]lineEdit, error) {
 		edits = append(edits, edit)
 	}
 	_, oldIf := mappingValue(job, "if")
-	if choice.selected && !choice.legacy && oldIf != nil {
+	if choice.selected && oldIf != nil {
 		expression, err := unwrapExpression(oldIf.Value)
 		if err == nil {
-			_, _, legacy, recognized := recognizeGate(expression, choice.caller)
-			if recognized && !legacy {
+			_, _, recognized := recognizeGate(expression, choice.caller)
+			if recognized {
 				return edits, nil
 			}
 		}
@@ -561,7 +522,7 @@ func setJobGates(text string, choices []jobChoice) (string, error) {
 		if current == nil || current.disabled != "" {
 			return "", fmt.Errorf("%s: job requires manual editing", choice.id)
 		}
-		if choice.selected == current.selected && !current.legacy {
+		if choice.selected == current.selected {
 			if !choice.selected {
 				continue
 			}

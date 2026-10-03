@@ -69,9 +69,6 @@ func (s *setup) run(ctx context.Context) error {
 	if _, err := s.gh.Run(ctx, []string{"--version"}, nil); err != nil {
 		return errors.New("install GitHub CLI (gh) before running setup")
 	}
-	if _, err := s.gh.Run(ctx, []string{"auth", "status", "--hostname", "github.com"}, nil); err != nil {
-		return errors.New("authenticate GitHub CLI first with gh auth login --hostname github.com")
-	}
 	data, err := s.gh.Run(ctx, []string{"repo", "view", "--json", "nameWithOwner,url,isPrivate"}, nil)
 	if err != nil {
 		return errors.New("could not resolve the current repository; run setup from its checkout")
@@ -86,6 +83,9 @@ func (s *setup) run(ctx context.Context) error {
 	}
 	owner, _, _ := strings.Cut(repo.Name, "/")
 	if repo.Private {
+		if _, err := s.gh.Run(ctx, []string{"auth", "status", "--hostname", "github.com"}, nil); err != nil {
+			return errors.New("authenticate GitHub CLI first with gh auth login --hostname github.com")
+		}
 		if err := s.checkOwner(ctx, owner); err != nil {
 			return err
 		}

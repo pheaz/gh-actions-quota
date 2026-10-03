@@ -1,0 +1,108 @@
+[
+  {
+    "name": "500 private plus 3000 public with cached visibility",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.2},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.8},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/public", "discountAmount": 6},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows", "repositoryName": "owner/public", "discountAmount": 12},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/public", "discountAmount": "ignored"}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}, "owner/public": {"status": 200, "private": false}},
+    "usedMinutes": 500,
+    "lookups": {"owner/private": 1, "owner/public": 1}
+  },
+  {
+    "name": "six standard runner SKUs",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux_slim", "repositoryName": "owner/private", "discountAmount": 3},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux_arm", "repositoryName": "owner/private", "discountAmount": 3},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows", "repositoryName": "owner/private", "discountAmount": 3},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows_arm", "repositoryName": "owner/private", "discountAmount": 3},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_macos", "repositoryName": "owner/private", "discountAmount": 3}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 3000,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "larger self-hosted storage and unrelated usage",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux_4_core", "repositoryName": "owner/private", "discountAmount": "ignored"},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows_8_core", "repositoryName": "owner/private", "discountAmount": "ignored"},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_self_hosted", "repositoryName": "owner/private", "discountAmount": "ignored"},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_storage", "repositoryName": "owner/private", "discountAmount": "ignored"},
+      {"product": "Packages", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": "ignored"},
+      {"product": "Actions", "unitType": "gigabytes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": "ignored"},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": null, "discountAmount": "ignored"}
+    ],
+    "repositories": {},
+    "usedMinutes": 0,
+    "lookups": {}
+  },
+  {
+    "name": "404 counts and caches",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.2},
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.8}
+    ],
+    "repositories": {"owner/private": {"status": 404}},
+    "usedMinutes": 500,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "visibility HTTP 401 fails closed",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3}
+    ],
+    "repositories": {"owner/private": {"status": 401}},
+    "error": "GitHub repository lookup failed",
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "visibility HTTP 403 fails closed",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3}
+    ],
+    "repositories": {"owner/private": {"status": 403}},
+    "error": "GitHub repository lookup failed",
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "visibility HTTP 500 fails closed",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3}
+    ],
+    "repositories": {"owner/private": {"status": 500}},
+    "error": "GitHub repository lookup failed",
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "invalid discount null",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": null}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "error": "Invalid discountAmount",
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "invalid discount \"3\"",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": "3"}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "error": "Invalid discountAmount",
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "invalid discount -1",
+    "usageItems": [
+      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": -1}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "error": "Invalid discountAmount",
+    "lookups": {"owner/private": 1}
+  }
+]
