@@ -107,6 +107,18 @@ func TestSetQuotaCallerNormalizesExistingSecretMapping(t *testing.T) {
 	}
 }
 
+
+func TestSetQuotaCallerLeavesUnselectedFileWithoutJobsUntouched(t *testing.T) {
+	content := "name: Disabled\n"
+	updated, err := setQuotaCaller(content, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != content {
+		t.Fatal("unselected file without jobs was modified")
+	}
+}
+
 func TestSetQuotaCallerRefusesConflictingQuotaJob(t *testing.T) {
 	content := "jobs:\n  quota:\n    runs-on: ubuntu-latest\n"
 	_, err := setQuotaCaller(content, true)
