@@ -37,11 +37,7 @@ func (s *setup) status(ctx context.Context) error {
 	if err := s.checkOwner(ctx, owner); err != nil {
 		return err
 	}
-	token, err := s.authorize(ctx, false)
-	if err != nil {
-		return err
-	}
-	plan, quota, err := s.client.checkAccount(ctx, owner, token)
+	token, plan, quota, err := s.authorizationForOwner(ctx, owner)
 	if err != nil {
 		return err
 	}

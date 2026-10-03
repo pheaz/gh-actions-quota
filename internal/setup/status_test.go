@@ -102,7 +102,14 @@ func TestStatusPrivateUsesDeviceFlowAndStaysReadOnly(t *testing.T) {
 				}
 				return nil
 			}
-			s.clipboard = func(context.Context, string) error { t.Fatal("status wrote clipboard"); return nil }
+			clipboardCalls := 0
+			s.clipboard = func(_ context.Context, code string) error {
+				clipboardCalls++
+				if code != "ABCD-EFGH" {
+					t.Errorf("wrong clipboard code: %s", code)
+				}
+				return nil
+			}
 			if err := os.MkdirAll(filepath.Join(s.root, ".github", "workflows"), 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -113,8 +120,12 @@ func TestStatusPrivateUsesDeviceFlowAndStaysReadOnly(t *testing.T) {
 			if err := s.status(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if browserCalls != 1 || !reflect.DeepEqual(endpoints, []string{"/login/device/code", "/login/oauth/access_token", "/user", "/users/owner/settings/billing/usage", "/repos/owner/private", "/repos/owner/public"}) {
+			if browserCalls != 1 || clipboardCalls != 1 || !reflect.DeepEqual(endpoints, []string{"/login/device/code", "/login/oauth/access_token", "/user", "/users/owner/settings/billing/usage", "/repos/owner/private", "/repos/owner/public"}) {
 				t.Fatalf("wrong authentication/billing requests: %v", endpoints)
+			}
+			store := s.credentials.(*fakeCredentialStore)
+			if store.saves != 1 || store.token != fakeToken {
+				t.Fatal("status did not persist fresh authorization")
 			}
 			if !reflect.DeepEqual(gh.calls, []ghCall{
 				{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
@@ -122,7 +133,7 @@ func TestStatusPrivateUsesDeviceFlowAndStaysReadOnly(t *testing.T) {
 			}) {
 				t.Fatalf("status called gh secret set or another unexpected command: %v", gh.calls)
 			}
-			for _, want := range []string{"Repository: owner/repo", "Visibility: private", "Plan: free", "Actions quota:", "Used:       " + test.usedText + " / 2000 min", "Remaining: " + test.remaining + " min", "Usage:      " + test.percent + "%"} {
+			for _, want := range []string{"Repository: owner/repo", "Visibility: private", "Code copied to clipboard: ABCD-EFGH", "Plan: free", "Actions quota:", "Used:       " + test.usedText + " / 2000 min", "Remaining: " + test.remaining + " min", "Usage:      " + test.percent + "%"} {
 				if !strings.Contains(output.String(), want) {
 					t.Errorf("missing status output %q: %s", want, output)
 				}
@@ -163,5 +174,29 @@ func TestStatusFailuresRemainReadOnly(t *testing.T) {
 		if !reflect.DeepEqual(before, repositorySnapshot(t, s.root)) {
 			t.Fatal("failed status modified repository files")
 		}
+	}
+}
+
+func TestStatusPrivateReusesStoredCredential(t *testing.T) {
+	gh := &fakeGH{}
+	s, output, requests := setupFixture(t, gh, validAccount, 0)
+	store := s.credentials.(*fakeCredentialStore)
+	store.token = fakeToken
+	s.browser = func(context.Context, string) error { t.Fatal("cached status opened browser"); return nil }
+	s.clipboard = func(context.Context, string) error { t.Fatal("cached status wrote clipboard"); return nil }
+	if err := s.status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if *requests != 3 {
+		t.Fatalf("cached status made %d API requests; want 3", *requests)
+	}
+	if store.loads != 1 || store.saves != 0 || store.deletes != 0 {
+		t.Fatalf("unexpected credential operations: %+v", store)
+	}
+	if strings.Contains(output.String(), "/login/device") || strings.Contains(output.String(), "Code:") || strings.Contains(output.String(), "Code copied") {
+		t.Fatal("cached status displayed device authorization")
+	}
+	if !strings.Contains(output.String(), "Plan: pro") {
+		t.Fatal("cached status did not complete")
 	}
 }

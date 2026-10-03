@@ -24,6 +24,45 @@ type fakeGH struct {
 	failAt    int
 }
 
+type fakeCredentialStore struct {
+	token     string
+	loadErr   error
+	saveErr   error
+	deleteErr error
+	loads     int
+	saves     int
+	deletes   int
+}
+
+func (s *fakeCredentialStore) Load(context.Context, string) (string, error) {
+	s.loads++
+	if s.loadErr != nil {
+		return "", s.loadErr
+	}
+	if s.token == "" {
+		return "", errCredentialNotFound
+	}
+	return s.token, nil
+}
+
+func (s *fakeCredentialStore) Save(_ context.Context, _ string, token string) error {
+	s.saves++
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.token = token
+	return nil
+}
+
+func (s *fakeCredentialStore) Delete(context.Context, string) error {
+	s.deletes++
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	s.token = ""
+	return nil
+}
+
 func (g *fakeGH) Run(_ context.Context, args []string, input io.Reader) ([]byte, error) {
 	call := ghCall{args: append([]string(nil), args...)}
 	if input != nil {
@@ -83,7 +122,7 @@ func setupFixture(t *testing.T, gh *fakeGH, account string, billingStatus int) (
 		}
 	})
 	var output bytes.Buffer
-	s := &setup{gh: gh, client: c, input: strings.NewReader(""), output: &output, browser: func(context.Context, string) error { return errors.New("headless") }, clipboard: func(context.Context, string) error { return nil }, root: t.TempDir()}
+	s := &setup{gh: gh, client: c, input: strings.NewReader(""), output: &output, browser: func(context.Context, string) error { return errors.New("headless") }, clipboard: func(context.Context, string) error { return nil }, credentials: &fakeCredentialStore{}, root: t.TempDir()}
 	return s, &output, &requests
 }
 
@@ -111,6 +150,10 @@ func TestSetupSecretWriteUsesOnlyStdin(t *testing.T) {
 	}
 	if strings.Contains(output.String(), fakeToken) {
 		t.Fatal("token logged")
+	}
+	store := s.credentials.(*fakeCredentialStore)
+	if store.saves != 1 || store.token != fakeToken {
+		t.Fatal("fresh authorization was not persisted")
 	}
 	for _, text := range []string{"Code copied to clipboard: ABCD-EFGH", "https://github.com/login/device", "2000.00 / 3000", workflowPath, "Stored repository secret", "No existing workflow files found."} {
 		if !strings.Contains(output.String(), text) {
@@ -210,5 +253,26 @@ func TestSetupAlwaysInitializesWorkflows(t *testing.T) {
 	err := s.run(context.Background())
 	if err == nil || err.Error() != "workflow selection requires an interactive terminal" {
 		t.Fatalf("expected workflow selection, got %v", err)
+	}
+}
+
+func TestSetupReusesStoredCredential(t *testing.T) {
+	gh := &fakeGH{}
+	s, output, requests := setupFixture(t, gh, validAccount, 0)
+	store := s.credentials.(*fakeCredentialStore)
+	store.token = fakeToken
+	s.browser = func(context.Context, string) error { t.Fatal("cached setup opened browser"); return nil }
+	s.clipboard = func(context.Context, string) error { t.Fatal("cached setup wrote clipboard"); return nil }
+	if err := s.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if *requests != 3 {
+		t.Fatalf("cached setup made %d API requests; want 3", *requests)
+	}
+	if store.loads != 1 || store.saves != 0 || store.deletes != 0 {
+		t.Fatalf("unexpected credential operations: %+v", store)
+	}
+	if strings.Contains(output.String(), "/login/device") || strings.Contains(output.String(), "Code:") || strings.Contains(output.String(), "Code copied") {
+		t.Fatal("cached setup displayed device authorization")
 	}
 }
