@@ -18,6 +18,10 @@ Setup opens GitHub's device authorization page and displays a code. Authorize as
 the **personal account that owns the current repository**. The extension checks
 the account identity, plan and billing access, then saves the token as the
 repository secret **`ACTIONS_QUOTA_TOKEN`** using your existing local `gh` login.
+It also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable workflow
+that wraps the quota action with a default threshold of 50 percent. Re-running
+setup leaves an identical generated file unchanged; if that path contains a
+modified workflow, setup refuses to overwrite it.
 
 The project never saves the token to a local file, passes it in command arguments
 or prints it. It remains in memory and is piped to `gh secret set` through stdin.
@@ -41,15 +45,9 @@ permissions:
 
 jobs:
   quota:
-    runs-on: ubuntu-latest
-    outputs:
-      allowed: ${{ steps.quota.outputs.allowed }}
-    steps:
-      - uses: philippwallrafen/gh-actions-quota@v1
-        id: quota
-        with:
-          token: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
-          threshold: 50
+    uses: ./.github/workflows/gh-actions-quota.yml
+    secrets:
+      ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
 
   expensive-ci:
     needs: quota
@@ -60,8 +58,10 @@ jobs:
       - run: swift test
 ```
 
+The generated reusable workflow defaults to a 50 percent threshold. Override it
+on the reusable-workflow call with `with: { threshold: 75 }` when needed.
 Usage below the threshold gives `allowed=true`. **Exactly at the threshold or
-above it, `allowed=false`.** The default threshold is `50` percent. Billing
+above it, `allowed=false`.** Billing
 belongs to `GITHUB_REPOSITORY_OWNER`, never the actor or pull request author.
 
 Authentication, billing, API or invalid-input failures fail closed: the action
