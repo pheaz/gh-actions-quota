@@ -62,7 +62,7 @@ jobs:
         run: |
           files="$(gofmt -l cmd internal)"
           if [[ -n "$files" ]]; then
-            printf '%s\n' "$files"
+            gofmt -d $files
             exit 1
           fi
 
