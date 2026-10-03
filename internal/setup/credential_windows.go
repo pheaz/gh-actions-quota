@@ -9,11 +9,9 @@ import (
 	"unsafe"
 )
 
-const (
-	windowsCredentialTypeGeneric = 1
-	windowsCredentialPersistLocalMachine = 2
-	windowsErrorNotFound = syscall.Errno(1168)
-)
+const windowsCredentialTypeGeneric = 1
+const windowsCredentialPersistLocalMachine = 2
+const windowsErrorNotFound = syscall.Errno(1168)
 
 var (
 	advapi32        = syscall.NewLazyDLL("advapi32.dll")
