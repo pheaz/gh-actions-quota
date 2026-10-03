@@ -223,8 +223,8 @@ func TestStatusFailuresRemainReadOnly(t *testing.T) {
 		account string
 		billing int
 	}{
-		{&fakeGH{failAt: 1}, validAccount, 0},
 		{&fakeGH{failAt: 2}, validAccount, 0},
+		{&fakeGH{failAt: 3}, validAccount, 0},
 		{&fakeGH{ownerType: "Organization"}, validAccount, 0},
 		{&fakeGH{}, `{"login":"other","type":"User","plan":{"name":"free"}}`, 0},
 		{&fakeGH{}, validAccount, 403},
@@ -236,7 +236,7 @@ func TestStatusFailuresRemainReadOnly(t *testing.T) {
 			t.Fatalf("unsafe or missing status error: %v", err)
 		}
 		for _, call := range test.gh.calls {
-			if call.args[0] == "secret" {
+			if len(call.args) > 1 && call.args[0] == "secret" && call.args[1] == "set" {
 				t.Fatal("failed status wrote a secret")
 			}
 		}
@@ -365,6 +365,124 @@ func TestStatusPlanFormatting(t *testing.T) {
 			want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Used:    742.33 / " + test.quota + " min  ( " + test.percent + "% )\n  Plan:    " + test.display + "\n"
 			if output.String() != want {
 				t.Fatalf("wrong status formatting: %s", output)
+			}
+		})
+	}
+}
+
+func TestStatusWithoutRepositoryUsesCurrentPersonalAccount(t *testing.T) {
+	gh := &fakeGH{failAt: 1}
+	s, output, _ := setupFixture(t, gh, validAccount, 0)
+	store := s.credentials.(*fakeCredentialStore)
+	store.token = fakeToken
+	s.client = testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			io.WriteString(w, `{"login":"signed-in","type":"User","plan":{"name":"free"}}`)
+		case "/users/signed-in/settings/billing/usage":
+			json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
+				billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
+			}})
+		case "/repos/signed-in/private":
+			io.WriteString(w, `{"private":true}`)
+		default:
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+		}
+	})
+	if err := s.status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := "Repository: not found\n\nActions quota:\n  Account: signed-in\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
+	if output.String() != want {
+		t.Fatalf("wrong status without repository: %s", output)
+	}
+	if strings.Contains(output.String(), "Setup:") || strings.Contains(output.String(), "Visibility:") {
+		t.Fatal("status without repository printed repository-only metadata")
+	}
+	if !reflect.DeepEqual(gh.calls, []ghCall{
+		{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
+		{args: []string{"api", "user", "--hostname", "github.com"}},
+	}) {
+		t.Fatalf("status without repository made unexpected gh calls: %v", gh.calls)
+	}
+}
+
+func TestStatusPrivateSetupPresence(t *testing.T) {
+	gh := &fakeGH{secretPresent: true}
+	s, output, _ := setupFixture(t, gh, validAccount, 0)
+	s.credentials.(*fakeCredentialStore).token = fakeToken
+	path := filepath.Join(s.root, filepath.FromSlash(workflowPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# installed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.status(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Visibility: Private (metered)",
+		"Setup:\n  Workflow: present\n  Secret:   present\n",
+		"Actions quota:\n  Account: owner\n  Used:    2000.00 / 3000 min  ( 66.67% )\n  Plan:    Pro\n",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("missing %q in private setup status: %s", want, output)
+		}
+	}
+}
+
+func TestStatusPublicShowsOnlyPresentSetupArtifacts(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		workflowPresent bool
+		secretPresent   bool
+		wantSetup       string
+	}{
+		{"none", false, false, ""},
+		{"workflow", true, false, "Setup:\n  Workflow: present\n"},
+		{"secret", false, true, "Setup:\n  Secret:   present\n"},
+		{"both", true, true, "Setup:\n  Workflow: present\n  Secret:   present\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gh := &fakeGH{public: true, repository: "some-org/example", secretPresent: test.secretPresent}
+			s, output, _ := setupFixture(t, gh, validAccount, 0)
+			s.credentials.(*fakeCredentialStore).token = fakeToken
+			if test.workflowPresent {
+				path := filepath.Join(s.root, filepath.FromSlash(workflowPath))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("# installed\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.client = testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/user":
+					io.WriteString(w, `{"login":"signed-in","type":"User","plan":{"name":"free"}}`)
+				case "/users/signed-in/settings/billing/usage":
+					json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
+						billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
+					}})
+				case "/repos/signed-in/private":
+					io.WriteString(w, `{"private":true}`)
+				default:
+					t.Errorf("unexpected endpoint: %s", r.URL.Path)
+				}
+			})
+			if err := s.status(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if test.wantSetup == "" {
+				if strings.Contains(output.String(), "Setup:") || strings.Contains(output.String(), "missing") {
+					t.Fatalf("public status showed absent setup artifacts: %s", output)
+				}
+			} else if !strings.Contains(output.String(), test.wantSetup) {
+				t.Fatalf("wrong public setup status: %s", output)
+			}
+			if strings.Contains(output.String(), "Workflow: missing") || strings.Contains(output.String(), "Secret:   missing") {
+				t.Fatalf("public status printed missing setup artifacts: %s", output)
 			}
 		})
 	}
