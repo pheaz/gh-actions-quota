@@ -107,7 +107,6 @@ func TestSetQuotaCallerNormalizesExistingSecretMapping(t *testing.T) {
 	}
 }
 
-
 func TestSetQuotaCallerLeavesUnselectedFileWithoutJobsUntouched(t *testing.T) {
 	content := "name: Disabled\n"
 	updated, err := setQuotaCaller(content, false)
