@@ -39,7 +39,7 @@ func (c *client) requestDeviceCode(ctx context.Context) (deviceCode, error) {
 	if device.DeviceCode == "" || !regexp.MustCompile(`^[A-Z0-9]{4}-[A-Z0-9]{4}$`).MatchString(device.UserCode) ||
 		device.VerificationURI != "https://github.com/login/device" || device.ExpiresIn <= 0 || device.ExpiresIn > 3600 ||
 		device.Interval < 0 || device.Interval > device.ExpiresIn {
-		return deviceCode{}, errors.New("invalid device authorization response; check that Device Flow is enabled for actions-quota")
+		return deviceCode{}, errors.New("invalid device authorization response; check that Device Flow is enabled for gh-actions-quota")
 	}
 	if device.Interval == 0 {
 		device.Interval = 5
@@ -50,7 +50,7 @@ func (c *client) requestDeviceCode(ctx context.Context) (deviceCode, error) {
 func validateToken(response tokenResponse) (string, error) {
 	// Presence matters: even expires_in: 0 or null must be rejected.
 	if len(response.ExpiresIn) != 0 || len(response.RefreshToken) != 0 || len(response.RefreshTokenExpiresIn) != 0 {
-		return "", errors.New("the GitHub App issued an expiring user token; disable user-to-server token expiration for actions-quota and run setup again")
+		return "", errors.New("the GitHub App issued an expiring user token; disable user-to-server token expiration for gh-actions-quota and run setup again")
 	}
 	if response.Error != "" || !strings.HasPrefix(response.AccessToken, "ghu_") || len(response.AccessToken) <= 4 ||
 		strings.ContainsAny(response.AccessToken, " \t\r\n") || !strings.EqualFold(response.TokenType, "bearer") || response.Scope != "" {
@@ -99,9 +99,9 @@ func (c *client) pollToken(ctx context.Context, device deviceCode) (string, erro
 		case "expired_token", "token_expired":
 			return "", errors.New("device authorization expired; run setup again")
 		case "device_flow_disabled":
-			return "", errors.New("enable Device Flow for the actions-quota GitHub App")
+			return "", errors.New("enable Device Flow for the gh-actions-quota GitHub App")
 		case "incorrect_client_credentials":
-			return "", errors.New("GitHub rejected the actions-quota client ID")
+			return "", errors.New("GitHub rejected the gh-actions-quota client ID")
 		default:
 			return "", errors.New("GitHub device authorization failed; run setup again")
 		}

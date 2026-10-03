@@ -72,7 +72,7 @@ func (s *setup) run(ctx context.Context) error {
 		return errors.New("could not determine the repository owner account type")
 	}
 	if strings.EqualFold(strings.TrimSpace(string(ownerType)), "Organization") {
-		return errors.New("organization-owned repositories are not supported in v1; actions-quota only requests personal Account Plan read access")
+		return errors.New("organization-owned repositories are not supported in v1; gh-actions-quota only requests personal Account Plan read access")
 	}
 	if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
 		return errors.New("unsupported repository owner account type")
@@ -88,7 +88,7 @@ func (s *setup) run(ctx context.Context) error {
 	} else {
 		fmt.Fprintf(s.output, "%s already exists\n", workflowPath)
 	}
-	fmt.Fprintln(s.output, "Requesting actions-quota Account Plan read access...")
+	fmt.Fprintln(s.output, "Requesting gh-actions-quota Account Plan read access...")
 
 	device, err := s.client.requestDeviceCode(ctx)
 	if err != nil {

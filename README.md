@@ -92,7 +92,7 @@ repository secret also fail closed in private repositories.
 
 ## GitHub App and security
 
-The **actions-quota** GitHub App uses:
+The **gh-actions-quota** GitHub App uses:
 
 | Setting | Value |
 | --- | --- |
