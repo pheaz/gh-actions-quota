@@ -1,22 +1,72 @@
-name: Release action and extension
+name: Release
 
 on:
-  push:
-    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment (ignored when resuming)
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+      resume_tag:
+        description: Existing version tag to recover, for example v1.1.0
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-v1
+  group: manual-release
   cancel-in-progress: false
 
 jobs:
-  checks:
-    uses: ./.github/workflows/checks.yml
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.candidate.outputs.tag }}
+      sha: ${{ steps.candidate.outputs.sha }}
+      base_sha: ${{ steps.candidate.outputs.base_sha }}
+      resume: ${{ steps.candidate.outputs.resume }}
+    steps:
+      - name: Require main dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: test "$DISPATCH_REF" = refs/heads/main
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm ci
+      - name: Prepare release candidate
+        id: candidate
+        env:
+          BUMP: ${{ inputs.bump }}
+          RESUME_TAG: ${{ inputs.resume_tag }}
+          CANDIDATE_BUNDLE: ${{ runner.temp }}/release-candidate/candidate.bundle
+        run: node scripts/release.mjs prepare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-candidate/candidate.bundle
+          if-no-files-found: error
+          retention-days: 7
 
-  release:
-    needs: checks
+  checks:
+    needs: prepare
+    uses: ./.github/workflows/checks.yml
+    with:
+      candidate_artifact: release-candidate
+      candidate_sha: ${{ needs.prepare.outputs.sha }}
+      candidate_tag: ${{ needs.prepare.outputs.tag }}
+
+  publish:
+    needs: [prepare, checks]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,39 +74,30 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Validate shared version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v1\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
-          test "v$(node -p 'require("./package.json").version')" = "$RELEASE_TAG"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-node@v6
         with:
-          go-version-file: go.mod
-          cache: false
-      - name: Build native extension assets
+          node-version: "24"
+          package-manager-cache: false
+      - name: Preserve release controller
+        run: cp scripts/release.mjs "$RUNNER_TEMP/release.mjs"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-candidate
+      - name: Restore validated candidate
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: bash scripts/build-release.sh "$RELEASE_TAG"
-      - name: Publish GitHub Release
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: node "$RUNNER_TEMP/release.mjs" restore "$RUNNER_TEMP/release-candidate/candidate.bundle" "$CANDIDATE_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets
+      - name: Publish or recover release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          args=(--verify-tag --generate-notes --title "$RELEASE_TAG")
-          if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease --latest=false); fi
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release/* --clobber
-          else
-            gh release create "$RELEASE_TAG" release/* "${args[@]}"
-          fi
-      - name: Advance stable major tag
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          # Do not let a late retry of an older release move v1 backwards.
-          latest="$(git tag --list 'v1.*.*' | sed '/-/d' | sort -V | tail -1)"
-          if [[ "$latest" != "$RELEASE_TAG" ]]; then exit 0; fi
-          git tag --force v1 "${RELEASE_TAG}^{commit}"
-          git push --force origin refs/tags/v1
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          RESUME: ${{ needs.prepare.outputs.resume }}
+          ASSET_DIRECTORY: ${{ runner.temp }}/release-assets
+        run: node "$RUNNER_TEMP/release.mjs" publish

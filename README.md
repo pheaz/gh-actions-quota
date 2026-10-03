@@ -241,9 +241,30 @@ write real repository secrets.
 
 ## Releases
 
-`v1.0.0` versions the action and extension together. The tag contains TypeScript
-source, `dist/index.js`, `action.yml` and Go source. The GitHub Release contains
-five standalone binaries and `checksums.txt`:
+The action and CLI extension share one stable semantic version. `package.json`
+is authoritative; the release workflow synchronizes its lockfile automatically.
+Current action major: `v1`.
+
+To publish, open **Actions → Release → Run workflow**, select **main**, and choose
+**patch**, **minor**, or **major**. Patch is the default. Leave `resume_tag` empty
+for a new release. A push to main or a manually pushed tag does not publish a
+release. Use a minor increment for compatible new functionality and a major
+increment for breaking changes to either the action or extension.
+
+The workflow prepares a local version commit, rebuilds the committed action
+bundle, and exports that commit as a Git bundle. Every validation job restores
+that exact candidate: TypeScript checks, action tests, release-management tests,
+Go tests on Linux/macOS/Windows, and the five native extension builds. Major
+increments also update the generated helper's action reference and the current
+major documented here.
+
+After validation, the workflow checks that main still matches its starting
+commit. If main has advanced, it stops without pushing the candidate; start a
+new run against current main. Otherwise it atomically pushes the version commit
+and annotated version tag, stages the executable assets in a draft GitHub
+Release, verifies their checksums, and publishes generated release notes.
+
+The GitHub Release contains five standalone executables and `checksums.txt`:
 
 - `darwin/arm64`
 - `darwin/amd64`
@@ -251,22 +272,61 @@ five standalone binaries and `checksums.txt`:
 - `linux/arm64`
 - `windows/amd64`
 
-Asset names end in the platform suffix expected by `gh extension install`, for
-example `gh-actions-quota_v1.0.0_darwin-arm64` and
-`gh-actions-quota_v1.0.0_windows-amd64.exe`. There are no archives or runtime
-dependencies for users.
+Asset names have the platform suffix expected by `gh extension install`, for
+example `gh-actions-quota_v1.1.0_darwin-arm64` and
+`gh-actions-quota_v1.1.0_windows-amd64.exe`. Each executable embeds its version
+for `gh actions-quota --version`. There are no archives or runtime dependencies
+for users. Only the explicit current-version assets are published; stale local
+builds are excluded.
 
-Before tagging, update the shared version in `package.json` and its lockfile,
-rebuild and commit `dist/index.js`, then push a matching semantic version tag.
-The release workflow repeats TypeScript checks, verifies the committed bundle,
-tests Go on Linux/macOS/Windows, cross-compiles the binaries, generates SHA256
-checksums and publishes assets with **`GITHUB_TOKEN`**. No long-term publishing
-credential is required.
+After publication, the corresponding movable major tag (for example `v1` or
+`v2`) advances to the newest published stable release of that major. Older
+recovery runs cannot move it backwards. Only a release newer than the current
+latest stable release is marked latest. Version-specific tags and published
+assets are never replaced by this workflow. Major tags must remain ordinary
+Git tags without an associated GitHub Release. Repository-level immutable
+releases can additionally enforce fixed version tags and assets; the workflow
+supports them and assembles every asset before publishing the draft.
 
-After a successful stable v1 release, the workflow advances the moving **`v1`**
-tag to the same commit. Prereleases do not advance it, and retries of older tags
-cannot move it backwards. Repository rules must allow the release workflow to
-create semantic version tags and update `v1`.
+### Recover an interrupted release
 
-Maintainers must configure the GitHub App settings above before the first public
-release. App registration settings are independent of repository files.
+If a failure happens after the version tag was pushed, run **Release** from
+**main** again with `resume_tag` set to that exact tag, for example `v1.1.0`.
+The bump choice is ignored. Recovery validates and rebuilds the tagged commit
+without changing main, incrementing the version, or moving the version tag.
+
+A missing release is created as a draft; a partial draft is completed and its
+assets verified before publication. Incomplete or mismatched assets may be
+replaced **only while the release is still a draft**. If publication already
+succeeded, recovery verifies the published checksums and assets and can finish
+a missing major-tag update. Published assets are never replaced, even when a
+new toolchain produces different binaries. Unexpected draft assets or damaged
+published assets require manual review; the workflow stops rather than silently
+repairing published history. The workflow summary lists the release version,
+source commit, all asset names, and major-tag result.
+
+The workflow uses only `GITHUB_TOKEN`, with `contents: write` restricted to the
+publishing job. Repository rules must permit that token to update main, create
+version tags, and move major tags. No personal access token is needed. Releases
+run serially with cancellation disabled; checks run inside the dispatched
+workflow rather than relying on token-created pushes to trigger another run.
+
+Installing or upgrading the published extension:
+
+```shell
+gh extension install philippwallrafen/gh-actions-quota --force
+# For an existing installation:
+gh extension upgrade actions-quota
+```
+
+Test release management locally with:
+
+```shell
+node --test scripts/release.test.mjs
+```
+
+Tests use temporary local Git repositories and fake GitHub operations. They
+exercise preparation, interruption recovery, and publication policy without
+publishing a real release. Implementing or merging changes to this workflow
+does not itself publish a release. GitHub App registration settings remain
+independent of release management.

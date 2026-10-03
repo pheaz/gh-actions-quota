@@ -28,7 +28,7 @@ func TestEnsureReusableWorkflowCreatesAndIsIdempotent(t *testing.T) {
 	for _, fragment := range []string{
 		"workflow_call:",
 		"ACTIONS_QUOTA_TOKEN:",
-		"philippwallrafen/gh-actions-quota@v1",
+		"philippwallrafen/gh-actions-quota@" + actionMajor,
 		"runs-on: ubuntu-slim",
 		"default: 50",
 		"usage_available:",

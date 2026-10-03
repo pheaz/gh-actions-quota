@@ -2,8 +2,8 @@
 set -euo pipefail
 
 version="${1:?Usage: scripts/build-release.sh v1.0.0}"
-if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
-  echo 'Expected a semantic version tag, for example v1.0.0' >&2
+if [[ ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo 'Expected a stable semantic version tag, for example v1.0.0' >&2
   exit 1
 fi
 

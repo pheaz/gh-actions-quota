@@ -10,6 +10,8 @@ import (
 
 const workflowPath = ".github/workflows/gh-actions-quota.yml"
 
+const actionMajor = "v1"
+
 const reusableWorkflow = `name: GitHub Actions quota
 
 on:
@@ -47,7 +49,7 @@ jobs:
       usage_percent: ${{ steps.quota.outputs['usage-percent'] }}
 
     steps:
-      - uses: philippwallrafen/gh-actions-quota@v1
+      - uses: philippwallrafen/gh-actions-quota@` + actionMajor + `
         id: quota
         with:
           token: ${{ secrets.ACTIONS_QUOTA_TOKEN }}

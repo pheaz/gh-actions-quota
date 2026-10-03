@@ -2,6 +2,17 @@ name: Checks
 
 on:
   workflow_call:
+    inputs:
+      candidate_artifact:
+        description: Optional Git bundle artifact for release validation
+        type: string
+        default: ""
+      candidate_sha:
+        type: string
+        default: ""
+      candidate_tag:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -15,6 +26,19 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.candidate_artifact != '' }}
+        with:
+          name: ${{ inputs.candidate_artifact }}
+          path: ${{ runner.temp }}/release-candidate
+      - name: Restore release candidate
+        if: ${{ inputs.candidate_artifact != '' }}
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: node scripts/release.mjs restore "$RUNNER_TEMP/release-candidate/candidate.bundle" "$CANDIDATE_SHA"
+      - name: Test release management
+        run: if [ -f scripts/release.test.mjs ]; then node --test scripts/release.test.mjs; fi
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
@@ -50,6 +74,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.candidate_artifact != '' }}
+        with:
+          name: ${{ inputs.candidate_artifact }}
+          path: ${{ runner.temp }}/release-candidate
+      - name: Restore release candidate
+        if: ${{ inputs.candidate_artifact != '' }}
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: node scripts/release.mjs restore "$RUNNER_TEMP/release-candidate/candidate.bundle" "$CANDIDATE_SHA"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -70,10 +109,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@v4
+        if: ${{ inputs.candidate_artifact != '' }}
+        with:
+          name: ${{ inputs.candidate_artifact }}
+          path: ${{ runner.temp }}/release-candidate
+      - name: Restore release candidate
+        if: ${{ inputs.candidate_artifact != '' }}
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: node scripts/release.mjs restore "$RUNNER_TEMP/release-candidate/candidate.bundle" "$CANDIDATE_SHA"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
-      - run: bash scripts/build-release.sh v1.0.0
+      - name: Build platform executables
+        env:
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          tag="${CANDIDATE_TAG:-v$(node -p 'require("./package.json").version')}"
+          bash scripts/build-release.sh "$tag"
+          test "$(release/gh-actions-quota_${tag}_linux-amd64 --version)" = "gh actions-quota $tag"
       - name: Verify all platform checksums
         run: cd release && sha256sum --check checksums.txt
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.candidate_artifact != '' }}
+        with:
+          name: release-assets
+          path: |
+            release/gh-actions-quota_${{ inputs.candidate_tag }}_darwin-arm64
+            release/gh-actions-quota_${{ inputs.candidate_tag }}_darwin-amd64
+            release/gh-actions-quota_${{ inputs.candidate_tag }}_linux-amd64
+            release/gh-actions-quota_${{ inputs.candidate_tag }}_linux-arm64
+            release/gh-actions-quota_${{ inputs.candidate_tag }}_windows-amd64.exe
+            release/checksums.txt
+          if-no-files-found: error
+          retention-days: 7
