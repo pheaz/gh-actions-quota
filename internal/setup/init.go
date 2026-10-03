@@ -152,7 +152,7 @@ func drawWorkflowChoices(output io.Writer, choices []workflowChoice, cursor int,
 		fmt.Fprintf(output, "\r\x1b[2K%s%s %s\r\n", pointer, marker, filepath.Base(choice.path))
 	}
 	fmt.Fprint(output, "\r\x1b[2K\r\n")
-	fmt.Fprint(output, "\r\x1b[2KUp/Down move, Space toggle, Enter apply, Esc cancel\r\n")
+	fmt.Fprint(output, "\r\x1b[2KUp/Down move, Space toggle, Enter apply, Ctrl-C cancel\r\n")
 }
 
 func readChecklistKey(input io.Reader) (string, error) {
@@ -344,7 +344,7 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 			sectionEnd = i
 			break
 		}
-		if indent == 2 && strings.HasSuffix(strings.SplitN(trimmed, "#", 2)[0], ":") {
+		if indent == 2 && strings.HasSuffix(strings.TrimSpace(strings.SplitN(trimmed, "#", 2)[0]), ":") {
 			starts = append(starts, i)
 		}
 	}
@@ -356,7 +356,14 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 		if index+1 < len(starts) {
 			end = starts[index+1]
 		}
-		id := strings.TrimSpace(strings.TrimSuffix(strings.SplitN(strings.TrimSpace(lines[start]), "#", 2)[0], ":"))
+		for end > start+1 {
+			trimmed := strings.TrimSpace(lines[end-1])
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				break
+			}
+			end--
+		}
+		id := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.SplitN(strings.TrimSpace(lines[start]), "#", 2)[0]), ":"))
 		id = strings.Trim(id, "'\"")
 		block := jobBlock{id: id, start: start, end: end}
 		blocks = append(blocks, block)
