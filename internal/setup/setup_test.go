@@ -19,14 +19,14 @@ type ghCall struct {
 	stdin string
 }
 type fakeGH struct {
-	calls        []ghCall
-	ownerType    string
-	repository   string
-	repoResponse string
-	currentUser  string
+	calls         []ghCall
+	ownerType     string
+	repository    string
+	repoResponse  string
+	currentUser   string
 	secretPresent bool
-	public       bool
-	failAt       int
+	public        bool
+	failAt        int
 }
 
 type fakeCredentialStore struct {
