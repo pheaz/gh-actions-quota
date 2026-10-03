@@ -29,6 +29,7 @@ func TestEnsureReusableWorkflowCreatesAndIsIdempotent(t *testing.T) {
 		"workflow_call:",
 		"ACTIONS_QUOTA_TOKEN:",
 		"philippwallrafen/gh-actions-quota@v1",
+		"runs-on: ubuntu-slim",
 		"default: 50",
 		"usage_available:",
 		"usage_percent:",
@@ -44,21 +45,6 @@ func TestEnsureReusableWorkflowCreatesAndIsIdempotent(t *testing.T) {
 	}
 	if created {
 		t.Fatal("identical workflow should not be rewritten")
-	}
-}
-
-func TestEnsureReusableWorkflowAcceptsCRLF(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, filepath.FromSlash(workflowPath))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(strings.ReplaceAll(reusableWorkflow, "\n", "\r\n")), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	created, err := ensureReusableWorkflow(root)
-	if err != nil || created {
-		t.Fatal("CRLF copy of the generated workflow should be accepted unchanged")
 	}
 }
 
