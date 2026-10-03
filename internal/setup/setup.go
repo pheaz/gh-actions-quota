@@ -84,9 +84,9 @@ func (s *setup) run(ctx context.Context) error {
 		return err
 	}
 	if created {
-		fmt.Fprintf(s.output, "Created reusable workflow: %s\n", workflowPath)
+		fmt.Fprintf(s.output, "Created %s\n", workflowPath)
 	} else {
-		fmt.Fprintf(s.output, "Reusable workflow already current: %s\n", workflowPath)
+		fmt.Fprintf(s.output, "%s already exists\n", workflowPath)
 	}
 	fmt.Fprintln(s.output, "Requesting actions-quota Account Plan read access...")
 
