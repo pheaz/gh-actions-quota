@@ -27,7 +27,7 @@ on:
         default: 50
     secrets:
       ACTIONS_QUOTA_TOKEN:
-        required: true
+        required: false
     outputs:
       allowed:
         description: Whether gated jobs may run.
