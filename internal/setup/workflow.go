@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const workflowPath = ".github/workflows/gh-actions-quota.yml"
@@ -59,7 +58,7 @@ func ensureReusableWorkflow(root string) (bool, error) {
 	path := filepath.Join(root, filepath.FromSlash(workflowPath))
 	existing, err := os.ReadFile(path)
 	if err == nil {
-		if strings.ReplaceAll(string(existing), "\r\n", "\n") == reusableWorkflow {
+		if string(existing) == reusableWorkflow {
 			return false, nil
 		}
 		return false, fmt.Errorf("%s already exists and differs from the generated template; reconcile or remove it before running setup again", workflowPath)
