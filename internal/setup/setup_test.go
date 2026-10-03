@@ -74,7 +74,7 @@ func setupFixture(t *testing.T, gh *fakeGH, account string, billingStatus int) (
 		}
 	})
 	var output bytes.Buffer
-	s := &setup{gh: gh, client: c, output: &output, browser: func(context.Context, string) error { return errors.New("headless") }}
+	s := &setup{gh: gh, client: c, output: &output, browser: func(context.Context, string) error { return errors.New("headless") }, root: t.TempDir()}
 	return s, &output, &requests
 }
 
@@ -103,7 +103,7 @@ func TestSetupSecretWriteUsesOnlyStdin(t *testing.T) {
 	if strings.Contains(output.String(), fakeToken) {
 		t.Fatal("token logged")
 	}
-	for _, text := range []string{"ABCD-EFGH", "https://github.com/login/device", "2000.00 / 3000", "philippwallrafen/gh-actions-quota@v1", "Stored repository secret"} {
+	for _, text := range []string{"ABCD-EFGH", "https://github.com/login/device", "2000.00 / 3000", workflowPath, "needs: quota", "Stored repository secret"} {
 		if !strings.Contains(output.String(), text) {
 			t.Errorf("missing setup output %s", text)
 		}

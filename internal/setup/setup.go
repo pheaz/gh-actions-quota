@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -18,9 +19,13 @@ const secretName = "ACTIONS_QUOTA_TOKEN"
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
 
-// Run authorizes the app and writes a repository secret using the existing gh login.
+// Run authorizes the app, writes the repository secret, and installs the reusable quota workflow.
 func Run(ctx context.Context, output io.Writer) error {
-	return (&setup{gh: ghRunner{}, client: newClient(), output: output, browser: openBrowser}).run(ctx)
+	root, err := os.Getwd()
+	if err != nil {
+		return errors.New("could not resolve the current working directory")
+	}
+	return (&setup{gh: ghRunner{}, client: newClient(), output: output, browser: openBrowser, root: root}).run(ctx)
 }
 
 type setup struct {
@@ -28,6 +33,7 @@ type setup struct {
 	client  *client
 	output  io.Writer
 	browser func(context.Context, string) error
+	root    string
 }
 
 func (s *setup) run(ctx context.Context) error {
@@ -59,7 +65,19 @@ func (s *setup) run(ctx context.Context) error {
 	if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
 		return errors.New("unsupported repository owner account type")
 	}
-	fmt.Fprintf(s.output, "Repository: %s\nRequesting actions-quota Account Plan read access...\n", repo.Name)
+
+	fmt.Fprintf(s.output, "Repository: %s\n", repo.Name)
+	created, err := ensureReusableWorkflow(s.root)
+	if err != nil {
+		return err
+	}
+	if created {
+		fmt.Fprintf(s.output, "Created reusable workflow: %s\n", workflowPath)
+	} else {
+		fmt.Fprintf(s.output, "Reusable workflow already current: %s\n", workflowPath)
+	}
+	fmt.Fprintln(s.output, "Requesting actions-quota Account Plan read access...")
+
 	device, err := s.client.requestDeviceCode(ctx)
 	if err != nil {
 		return err
@@ -88,7 +106,18 @@ func (s *setup) run(ctx context.Context) error {
 		return errors.New("could not store ACTIONS_QUOTA_TOKEN; check your local gh login and repository secret write access, then run setup again")
 	}
 	fmt.Fprintf(s.output, "\nPlan: %s\nActions usage: %.2f / %d Linux-equivalent minutes\nStored repository secret: %s\n", plan, used, quota, secretName)
-	fmt.Fprintln(s.output, "\nAdd this step to your quota job:\n\n- uses: philippwallrafen/gh-actions-quota@v1\n  id: quota\n  with:\n    token: ${{ secrets.ACTIONS_QUOTA_TOKEN }}\n    threshold: 50")
+	fmt.Fprintln(s.output, `
+Call the reusable quota workflow from each workflow you want to gate:
+
+quota:
+  uses: ./.github/workflows/gh-actions-quota.yml
+  secrets:
+    ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
+
+Then gate expensive jobs with:
+
+needs: quota
+if: needs.quota.outputs.allowed == 'true'`)
 	return nil
 }
 

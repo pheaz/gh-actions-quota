@@ -16,7 +16,7 @@ func main() {
 	defer stop()
 	args := os.Args[1:]
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")) {
-		fmt.Println("Usage: gh actions-quota setup\n\nAuthorize the actions-quota GitHub App with Plan read access and store its\nnon-expiring user token as ACTIONS_QUOTA_TOKEN in the current repository.")
+		fmt.Println("Usage: gh actions-quota setup\n\nAuthorize the actions-quota GitHub App with Plan read access, store its\nnon-expiring user token as ACTIONS_QUOTA_TOKEN, and create the reusable\n.github/workflows/gh-actions-quota.yml quota workflow in the current repository.")
 		return
 	}
 	if len(args) == 1 && args[0] == "--version" {
