@@ -14,13 +14,17 @@ gh extension install philippwallrafen/gh-actions-quota --force
 gh actions-quota setup
 ```
 
-For a **private repository**, setup opens GitHub's device authorization page and
-displays a code. When a supported clipboard command is available, the device
-code is copied to the clipboard before the browser opens; otherwise setup simply
-prints the code. Authorize as the **personal account that owns the current
-repository**. The extension checks the account identity, plan and billing access,
-then saves the token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using
-your existing local `gh` login.
+For a **private repository**, setup first looks for an existing gh-actions-quota
+authorization for the owning personal account in the operating system's secure
+credential store. If none is available, setup opens GitHub's device authorization
+page and copies the device code to the clipboard before opening the browser when
+clipboard support is available. Authorize as the **personal account that owns the
+current repository**. After validating the account identity, plan and billing
+access, the extension stores the App token in the OS credential store and saves
+the same token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using your
+existing local `gh` login. The cached authorization is account-scoped, not
+repository-scoped, so other private repositories owned by the same personal
+account can reuse it without another device login.
 
 For a **public repository**, standard GitHub-hosted runners are unmetered. Setup
 therefore skips GitHub App authorization and does not create
@@ -86,10 +90,14 @@ Setup lists the configured workflow files and reminds you that thresholds can
 be adjusted there. Jobs that you leave unselected must be configured manually
 if you want them to be gated.
 
-The project never saves the token to a local file, passes it in command arguments
-or prints it. It remains in memory and is piped to `gh secret set` through stdin.
-There is no server, central token store or telemetry. `gh` is only needed for
-setup and status; workflow users need no additional runtime or installation step.
+The project never saves the token to a plaintext file, passes it in command
+arguments or prints it. For private-repository CLI use it persists the token only
+in the operating system's secure credential store: macOS Keychain, Windows
+Credential Manager, or the Linux Secret Service via `secret-tool`. If secure
+storage is unavailable, the command still works with an in-memory token and asks
+for authorization again next time; there is no plaintext fallback. Repository
+secret writes continue to pipe the token to `gh secret set` through stdin.
+There is no server, central token store or telemetry.
 
 Organization-owned repositories are **not supported for metered billing in v1**.
 Public repositories using standard GitHub-hosted runners need no setup or token.
@@ -105,8 +113,11 @@ Visibility: public
 Actions quota: unmetered
 ```
 
-For a private repository, authorize the owning personal account through the
-GitHub App device flow. After the authorization prompts, status shows:
+For a private repository, status reuses the owning personal account's cached
+GitHub App authorization. The device flow is shown only when no usable credential
+exists, when it was revoked, or when secure storage was unavailable on the
+previous run. Fresh device codes use the same clipboard behavior as setup.
+Status then shows:
 
 ```text
 Repository: owner/repo
@@ -120,9 +131,10 @@ Actions quota:
   Usage:      37.12%
 ```
 
-Remaining minutes never fall below zero. Status is read-only: it changes no
-repository files, secrets or local credentials, never logs the token, and
-keeps it only in memory for the command's lifetime.
+Remaining minutes never fall below zero. Status is read-only with respect to the
+repository: it changes no repository files or secrets and never logs the token.
+A successful fresh authorization may create or replace the account-scoped entry
+in the operating system's secure credential store.
 
 ## Workflow
 
@@ -181,11 +193,20 @@ The **gh-actions-quota** GitHub App uses:
 The app token only reads the personal account's plan and billing. The app does
 not request `Secrets: write`. Only the locally authenticated `gh` process writes
 the repository secret. The action subsequently reads that secret; it does not
-write repository settings. Expiring tokens and refresh-token responses are
-rejected because this design does not store or refresh credentials locally.
+write repository settings. Expiring tokens and refresh-token responses remain
+rejected; the current non-expiring App user token is protected by the OS
+credential store instead.
 
-Re-run setup to replace a revoked token. Authorization can be revoked in your
-GitHub account's authorized GitHub Apps settings.
+Credential keys are scoped by GitHub host and owning personal account, so one
+authorization is reused across that account's private repositories on the same
+machine. macOS uses Keychain and Windows uses Credential Manager directly. Linux
+uses the Secret Service through the standard `secret-tool` command; when it is
+not installed or no Secret Service is available, gh-actions-quota deliberately
+falls back to in-memory authorization rather than writing a plaintext credential.
+
+If a cached token is rejected as unauthorized/forbidden or belongs to the wrong
+account, the CLI discards it and performs the device flow again. Authorization
+can also be revoked in your GitHub account's authorized GitHub Apps settings.
 
 See GitHub's [device-flow documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage).
@@ -257,7 +278,10 @@ bundle is committed at `dist/index.js`; `action.yml` runs it with `node24`.
 Node.js and the JavaScript package manager are development/build tools only.
 The extension uses Go 1.27.1 or newer. It uses `golang.org/x/term` for the
 cross-platform interactive workflow and job checklists, and `go.yaml.in/yaml/v3`
-for structural validation and targeted YAML edits.
+for structural validation and targeted YAML edits. Secure login persistence uses
+native macOS Keychain and Windows Credential Manager facilities. Linux persistence
+uses Secret Service through `secret-tool` when available; it is optional and
+there is no insecure file fallback.
 
 After installing the locked development dependencies, validate the action with:
 
