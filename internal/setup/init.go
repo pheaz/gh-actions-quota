@@ -236,6 +236,9 @@ func setQuotaCaller(content string, selected bool) (string, error) {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	lines := strings.Split(normalized, "\n")
 	jobsIndex, callers, blocks := analyzeJobs(lines)
+	if !selected && len(callers) == 0 {
+		return content, nil
+	}
 	if jobsIndex < 0 {
 		return "", errors.New("workflow has no top-level jobs: key")
 	}
@@ -244,9 +247,6 @@ func setQuotaCaller(content string, selected bool) (string, error) {
 	}
 
 	if !selected {
-		if len(callers) == 0 {
-			return content, nil
-		}
 		caller := callers[0]
 		result := append([]string{}, lines[:caller.start]...)
 		result = append(result, lines[caller.end:]...)
