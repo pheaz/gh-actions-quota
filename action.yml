@@ -4,7 +4,7 @@ author: Philipp Wallrafen
 
 inputs:
   token:
-    description: Repository secret created by `gh actions-quota setup`.
+    description: Repository secret created by `gh actions-quota setup`; required only for metered private repositories.
     required: false
   threshold:
     description: Stop allowing gated jobs once usage reaches this percentage.
