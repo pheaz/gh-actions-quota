@@ -16,8 +16,22 @@ import (
 )
 
 const secretName = "ACTIONS_QUOTA_TOKEN"
+const linuxMinutePriceUSD = 0.006
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
+var skuSeparators = regexp.MustCompile(`[\s-]+`)
+var includedSKUs = map[string]bool{
+	"actions_linux_slim":  true,
+	"actions_linux":       true,
+	"actions_linux_arm":   true,
+	"actions_windows":     true,
+	"actions_windows_arm": true,
+	"actions_macos":       true,
+}
+
+func normalizeSKU(sku string) string {
+	return skuSeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(sku)), "_")
+}
 
 // Run installs the reusable quota workflow, configures callers, and authorizes the app only when the repository needs a billing token.
 func Run(ctx context.Context, input io.Reader, output io.Writer) error {
@@ -25,15 +39,20 @@ func Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	if err != nil {
 		return errors.New("could not resolve the current working directory")
 	}
-	return (&setup{
+	s := newSetup(input, output)
+	s.root = root
+	return s.run(ctx)
+}
+
+func newSetup(input io.Reader, output io.Writer) *setup {
+	return &setup{
 		gh:        ghRunner{},
 		client:    newClient(),
 		input:     input,
 		output:    output,
 		browser:   openBrowser,
 		clipboard: copyToClipboard,
-		root:      root,
-	}).run(ctx)
+	}
 }
 
 type setup struct {
@@ -67,15 +86,8 @@ func (s *setup) run(ctx context.Context) error {
 	}
 	owner, _, _ := strings.Cut(repo.Name, "/")
 	if repo.Private {
-		ownerType, err := s.gh.Run(ctx, []string{"api", "users/" + owner, "--hostname", "github.com", "--jq", ".type"}, nil)
-		if err != nil {
-			return errors.New("could not determine the repository owner account type")
-		}
-		if strings.EqualFold(strings.TrimSpace(string(ownerType)), "Organization") {
-			return errors.New("organization-owned private repositories are not supported in v1; gh-actions-quota only requests personal Account Plan read access")
-		}
-		if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
-			return errors.New("unsupported repository owner account type")
+		if err := s.checkOwner(ctx, owner); err != nil {
+			return err
 		}
 	}
 
@@ -101,28 +113,7 @@ func (s *setup) run(ctx context.Context) error {
 
 	fmt.Fprintln(s.output, "Private repository: requesting gh-actions-quota Account Plan read access...")
 
-	device, err := s.client.requestDeviceCode(ctx)
-	if err != nil {
-		return err
-	}
-
-	clipboardCtx, clipboardCancel := context.WithTimeout(ctx, 2*time.Second)
-	copied := s.clipboard != nil && s.clipboard(clipboardCtx, device.UserCode) == nil
-	clipboardCancel()
-	fmt.Fprintf(s.output, "\nOpen: %s\n", device.VerificationURI)
-	if copied {
-		fmt.Fprintf(s.output, "Code copied to clipboard: %s\n", device.UserCode)
-	} else {
-		fmt.Fprintf(s.output, "Code: %s\n", device.UserCode)
-	}
-
-	browserCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	if s.browser(browserCtx, device.VerificationURI) != nil {
-		fmt.Fprintln(s.output, "Open the URL in your browser to continue.")
-	}
-	cancel()
-	fmt.Fprintln(s.output, "Waiting for GitHub authorization...")
-	token, err := s.client.pollToken(ctx, device)
+	token, err := s.authorize(ctx, true)
 	if err != nil {
 		return err
 	}
@@ -146,6 +137,45 @@ func (s *setup) run(ctx context.Context) error {
 
 	fmt.Fprintln(s.output, "\nQuota setup complete. Jobs without quota conditions must be configured manually if you want to gate them.")
 	return nil
+}
+
+func (s *setup) checkOwner(ctx context.Context, owner string) error {
+	ownerType, err := s.gh.Run(ctx, []string{"api", "users/" + owner, "--hostname", "github.com", "--jq", ".type"}, nil)
+	if err != nil {
+		return errors.New("could not determine the repository owner account type")
+	}
+	if strings.EqualFold(strings.TrimSpace(string(ownerType)), "Organization") {
+		return errors.New("organization-owned private repositories are not supported in v1; gh-actions-quota only requests personal Account Plan read access")
+	}
+	if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
+		return errors.New("unsupported repository owner account type")
+	}
+	return nil
+}
+
+func (s *setup) authorize(ctx context.Context, copyCode bool) (string, error) {
+	device, err := s.client.requestDeviceCode(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	clipboardCtx, clipboardCancel := context.WithTimeout(ctx, 2*time.Second)
+	copied := copyCode && s.clipboard != nil && s.clipboard(clipboardCtx, device.UserCode) == nil
+	clipboardCancel()
+	fmt.Fprintf(s.output, "\nOpen: %s\n", device.VerificationURI)
+	if copied {
+		fmt.Fprintf(s.output, "Code copied to clipboard: %s\n", device.UserCode)
+	} else {
+		fmt.Fprintf(s.output, "Code: %s\n", device.UserCode)
+	}
+
+	browserCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	if s.browser(browserCtx, device.VerificationURI) != nil {
+		fmt.Fprintln(s.output, "Open the URL in your browser to continue.")
+	}
+	cancel()
+	fmt.Fprintln(s.output, "Waiting for GitHub authorization...")
+	return s.client.pollToken(ctx, device)
 }
 
 func (c *client) checkAccount(ctx context.Context, owner, token string) (string, int, error) {
@@ -176,32 +206,73 @@ func (c *client) checkBilling(ctx context.Context, owner, token string) (float64
 	var report struct {
 		UsageItems json.RawMessage `json:"usageItems"`
 	}
-	if err := c.request(ctx, http.MethodGet, c.apiBase+"/users/"+url.PathEscape(owner)+"/settings/billing/usage/summary?"+query.Encode(), token, nil, &report); err != nil {
+	if err := c.request(ctx, http.MethodGet, c.apiBase+"/users/"+url.PathEscape(owner)+"/settings/billing/usage?"+query.Encode(), token, nil, &report); err != nil {
 		return 0, err
 	}
-	var items []struct {
-		Product        *string  `json:"product"`
-		UnitType       *string  `json:"unitType"`
-		DiscountAmount *float64 `json:"discountAmount"`
+	var items []*struct {
+		Product        any             `json:"product"`
+		UnitType       any             `json:"unitType"`
+		SKU            any             `json:"sku"`
+		RepositoryName any             `json:"repositoryName"`
+		DiscountAmount json.RawMessage `json:"discountAmount"`
 	}
 	if len(report.UsageItems) == 0 || json.Unmarshal(report.UsageItems, &items) != nil || items == nil {
 		return 0, errors.New("GitHub billing response must contain usageItems")
 	}
-	var discount float64
+	publicRepositories := make(map[string]bool)
+	var discountedUSD float64
 	for _, item := range items {
-		if item.Product == nil || item.UnitType == nil {
+		if item == nil {
 			return 0, errors.New("GitHub billing usage item is invalid")
 		}
-		if *item.Product == "Actions" && *item.UnitType == "minutes" {
-			if item.DiscountAmount == nil || *item.DiscountAmount < 0 {
-				return 0, errors.New("GitHub billing discountAmount is invalid")
-			}
-			discount += *item.DiscountAmount
+		sku, _ := item.SKU.(string)
+		repository, hasRepository := item.RepositoryName.(string)
+		if item.Product != "Actions" || item.UnitType != "minutes" || !includedSKUs[normalizeSKU(sku)] || !hasRepository {
+			continue
 		}
+		public, cached := publicRepositories[repository]
+		if !cached {
+			var err error
+			public, err = c.isPublicRepository(ctx, repository, token)
+			if err != nil {
+				return 0, err
+			}
+			publicRepositories[repository] = public
+		}
+		if public {
+			continue
+		}
+		var discount *float64
+		if json.Unmarshal(item.DiscountAmount, &discount) != nil || discount == nil || math.IsInf(*discount, 0) || math.IsNaN(*discount) || *discount < 0 {
+			return 0, errors.New("Invalid discountAmount")
+		}
+		discountedUSD += *discount
 	}
-	used := discount / 0.006
+	used := discountedUSD / linuxMinutePriceUSD
 	if math.IsInf(used, 0) || math.IsNaN(used) {
 		return 0, errors.New("GitHub billing usage is out of range")
 	}
 	return used, nil
+}
+
+func (c *client) isPublicRepository(ctx context.Context, repository, token string) (bool, error) {
+	parts := strings.SplitN(repository, "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return false, nil
+	}
+	var repo *struct {
+		Private json.RawMessage `json:"private"`
+	}
+	err := c.request(ctx, http.MethodGet, c.apiBase+"/repos/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1]), token, nil, &repo)
+	if err != nil {
+		var httpError *githubHTTPError
+		if errors.As(err, &httpError) && httpError.status == http.StatusNotFound {
+			return false, nil
+		}
+		return false, errors.New("GitHub repository lookup failed")
+	}
+	if repo == nil {
+		return false, errors.New("GitHub returned an invalid response")
+	}
+	return strings.TrimSpace(string(repo.Private)) == "false", nil
 }

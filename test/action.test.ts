@@ -31,8 +31,8 @@ async function action(options: { env?: NodeJS.ProcessEnv; used?: number; plan?: 
     const body = String(url).endsWith("/user")
       ? { login: "owner", type: "User", plan: { name: options.plan || "pro" } }
       : String(url).includes("/billing/")
-        ? { usageItems: [{ product: "Actions", unitType: "minutes", discountAmount: options.malformed ? "invalid" : (options.used ?? 1200) * 0.006 }] }
-        : { type: options.ownerType || "User" };
+        ? { usageItems: [{ product: "Actions", unitType: "minutes", sku: "actions_linux", repositoryName: "owner/repo", discountAmount: options.malformed ? "invalid" : (options.used ?? 1200) * 0.006 }] }
+        : String(url).includes("/repos/") ? { private: true } : { type: options.ownerType || "User" };
     return new Response(JSON.stringify(body));
   };
   try {

@@ -18,6 +18,14 @@ const apiVersion = "2026-03-10"
 
 const maxResponseBytes = 4 << 20
 
+type githubHTTPError struct {
+	status int
+}
+
+func (e *githubHTTPError) Error() string {
+	return fmt.Sprintf("GitHub returned HTTP %d; check authorization and Plan read access", e.status)
+}
+
 type client struct {
 	http      *http.Client
 	oauthBase string
@@ -72,7 +80,7 @@ func (c *client) request(ctx context.Context, method, endpoint, token string, fo
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("GitHub returned HTTP %d; check authorization and Plan read access", response.StatusCode)
+		return &githubHTTPError{status: response.StatusCode}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil || len(data) > maxResponseBytes || json.Unmarshal(data, result) != nil {
