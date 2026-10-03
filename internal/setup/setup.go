@@ -19,7 +19,7 @@ const secretName = "ACTIONS_QUOTA_TOKEN"
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
 
-// Run authorizes the app, writes the repository secret, installs the reusable quota workflow, and interactively configures workflow callers.
+// Run installs the reusable quota workflow, configures callers, and authorizes the app only when the repository needs a billing token.
 func Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
@@ -53,27 +53,30 @@ func (s *setup) run(ctx context.Context) error {
 	if _, err := s.gh.Run(ctx, []string{"auth", "status", "--hostname", "github.com"}, nil); err != nil {
 		return errors.New("authenticate GitHub CLI first with gh auth login --hostname github.com")
 	}
-	data, err := s.gh.Run(ctx, []string{"repo", "view", "--json", "nameWithOwner,url"}, nil)
+	data, err := s.gh.Run(ctx, []string{"repo", "view", "--json", "nameWithOwner,url,isPrivate"}, nil)
 	if err != nil {
 		return errors.New("could not resolve the current repository; run setup from its checkout")
 	}
 	var repo struct {
-		Name string `json:"nameWithOwner"`
-		URL  string `json:"url"`
+		Name    string `json:"nameWithOwner"`
+		URL     string `json:"url"`
+		Private bool   `json:"isPrivate"`
 	}
 	if json.Unmarshal(data, &repo) != nil || !repositoryPattern.MatchString(repo.Name) || repo.URL != "https://github.com/"+repo.Name {
 		return errors.New("setup requires a current repository hosted on github.com")
 	}
 	owner, _, _ := strings.Cut(repo.Name, "/")
-	ownerType, err := s.gh.Run(ctx, []string{"api", "users/" + owner, "--hostname", "github.com", "--jq", ".type"}, nil)
-	if err != nil {
-		return errors.New("could not determine the repository owner account type")
-	}
-	if strings.EqualFold(strings.TrimSpace(string(ownerType)), "Organization") {
-		return errors.New("organization-owned repositories are not supported in v1; gh-actions-quota only requests personal Account Plan read access")
-	}
-	if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
-		return errors.New("unsupported repository owner account type")
+	if repo.Private {
+		ownerType, err := s.gh.Run(ctx, []string{"api", "users/" + owner, "--hostname", "github.com", "--jq", ".type"}, nil)
+		if err != nil {
+			return errors.New("could not determine the repository owner account type")
+		}
+		if strings.EqualFold(strings.TrimSpace(string(ownerType)), "Organization") {
+			return errors.New("organization-owned private repositories are not supported in v1; gh-actions-quota only requests personal Account Plan read access")
+		}
+		if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
+			return errors.New("unsupported repository owner account type")
+		}
 	}
 
 	fmt.Fprintf(s.output, "Repository: %s\n", repo.Name)
@@ -86,7 +89,17 @@ func (s *setup) run(ctx context.Context) error {
 	} else {
 		fmt.Fprintf(s.output, "%s already exists\n", workflowPath)
 	}
-	fmt.Fprintln(s.output, "Requesting gh-actions-quota Account Plan read access...")
+
+	if !repo.Private {
+		fmt.Fprintf(s.output, "Public repository: %s is not required.\n", secretName)
+		if err := initializeWorkflows(s.root, s.input, s.output); err != nil {
+			return err
+		}
+		fmt.Fprintln(s.output, "\nQuota setup complete. Jobs without quota conditions must be configured manually if you want to gate them.")
+		return nil
+	}
+
+	fmt.Fprintln(s.output, "Private repository: requesting gh-actions-quota Account Plan read access...")
 
 	device, err := s.client.requestDeviceCode(ctx)
 	if err != nil {

@@ -14,13 +14,17 @@ gh extension install philippwallrafen/gh-actions-quota --force
 gh actions-quota setup
 ```
 
-Setup opens GitHub's device authorization page and displays a code. When a
-supported clipboard command is available, the device code is copied to the
-clipboard before the browser opens; otherwise setup simply prints the code.
-Authorize as the **personal account that owns the current repository**. The
-extension checks the account identity, plan and billing access, then saves the
-token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using your existing local
-`gh` login.
+For a **private repository**, setup opens GitHub's device authorization page and
+displays a code. When a supported clipboard command is available, the device
+code is copied to the clipboard before the browser opens; otherwise setup simply
+prints the code. Authorize as the **personal account that owns the current
+repository**. The extension checks the account identity, plan and billing access,
+then saves the token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using
+your existing local `gh` login.
+
+For a **public repository**, standard GitHub-hosted runners are unmetered. Setup
+therefore skips GitHub App authorization and does not create
+`ACTIONS_QUOTA_TOKEN`; it only installs and configures the workflow integration.
 
 Setup also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable
 workflow that wraps the quota action with a default threshold of 50 percent.

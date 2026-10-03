@@ -37,7 +37,7 @@ func TestEnsureReusableWorkflowCreatesAndIsIdempotent(t *testing.T) {
 		"steps.gh-actions-quota.outputs['usage-available']",
 		"steps.gh-actions-quota.outputs['usage-percent']",
 		"workflow_call:",
-		"ACTIONS_QUOTA_TOKEN:",
+		"ACTIONS_QUOTA_TOKEN:\n        required: false",
 		"philippwallrafen/gh-actions-quota@" + actionMajor,
 		"runs-on: ubuntu-slim",
 		"default: 50",

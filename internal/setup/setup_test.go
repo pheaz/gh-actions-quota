@@ -20,6 +20,7 @@ type ghCall struct {
 type fakeGH struct {
 	calls     []ghCall
 	ownerType string
+	public    bool
 	failAt    int
 }
 
@@ -35,7 +36,11 @@ func (g *fakeGH) Run(_ context.Context, args []string, input io.Reader) ([]byte,
 	}
 	switch args[0] {
 	case "repo":
-		return []byte(`{"nameWithOwner":"owner/repo","url":"https://github.com/owner/repo"}`), nil
+		privacy := "true"
+		if g.public {
+			privacy = "false"
+		}
+		return []byte(`{"nameWithOwner":"owner/repo","url":"https://github.com/owner/repo","isPrivate":` + privacy + `}`), nil
 	case "api":
 		if g.ownerType != "" {
 			return []byte(g.ownerType), nil
@@ -118,6 +123,30 @@ func TestOrganizationRejectedBeforeDeviceFlow(t *testing.T) {
 	err := s.run(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "organization-owned") || *requests != 0 {
 		t.Fatal("organization was not rejected before authorization")
+	}
+}
+
+func TestPublicRepositorySkipsAuthorizationAndSecretWrite(t *testing.T) {
+	gh := &fakeGH{public: true, ownerType: "Organization"}
+	s, output, requests := setupFixture(t, gh, validAccount, 0)
+	if err := s.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if *requests != 0 {
+		t.Fatalf("public repository unexpectedly used device or billing API: %d requests", *requests)
+	}
+	if len(gh.calls) != 3 {
+		t.Fatalf("expected only gh version, auth status and repo lookup, got %d calls", len(gh.calls))
+	}
+	for _, call := range gh.calls {
+		if len(call.args) > 0 && (call.args[0] == "api" || call.args[0] == "secret") {
+			t.Fatalf("public setup unexpectedly called gh %s", call.args[0])
+		}
+	}
+	for _, text := range []string{"Public repository:", "ACTIONS_QUOTA_TOKEN is not required", workflowPath, "No existing workflow files found."} {
+		if !strings.Contains(output.String(), text) {
+			t.Errorf("missing public setup output %q", text)
+		}
 	}
 }
 

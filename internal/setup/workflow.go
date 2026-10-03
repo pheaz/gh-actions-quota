@@ -27,7 +27,7 @@ on:
         default: 50
     secrets:
       ACTIONS_QUOTA_TOKEN:
-        required: true
+        required: false
     outputs:
       allowed:
         description: Whether gated jobs may run.
@@ -61,6 +61,7 @@ jobs:
 
 // Match the previous generated template exactly; customized files remain protected.
 var legacyReusableWorkflow = strings.NewReplacer(
+	"ACTIONS_QUOTA_TOKEN:\n        required: false", "ACTIONS_QUOTA_TOKEN:\n        required: true",
 	"name: gh-actions-quota\n\non:", "name: GitHub Actions quota\n\non:",
 	"jobs.gh-actions-quota.outputs", "jobs.quota.outputs",
 	"  gh-actions-quota:\n", "  quota:\n",
