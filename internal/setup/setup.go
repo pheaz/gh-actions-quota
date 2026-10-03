@@ -19,6 +19,7 @@ const secretName = "ACTIONS_QUOTA_TOKEN"
 const linuxMinutePriceUSD = 0.006
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
+var accountPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 var skuSeparators = regexp.MustCompile(`[\s-]+`)
 var includedSKUs = map[string]bool{
 	"actions_linux_slim":  true,
@@ -33,7 +34,7 @@ func normalizeSKU(sku string) string {
 	return skuSeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(sku)), "_")
 }
 
-// Run installs the reusable quota workflow, configures callers, and authorizes the app only when the repository needs a billing token.
+// Run configures quota checks for private repositories; public repositories need no setup.
 func Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
@@ -78,19 +79,21 @@ func (s *setup) run(ctx context.Context) error {
 	var repo struct {
 		Name    string `json:"nameWithOwner"`
 		URL     string `json:"url"`
-		Private bool   `json:"isPrivate"`
+		Private *bool  `json:"isPrivate"`
 	}
-	if json.Unmarshal(data, &repo) != nil || !repositoryPattern.MatchString(repo.Name) || repo.URL != "https://github.com/"+repo.Name {
+	if json.Unmarshal(data, &repo) != nil || !repositoryPattern.MatchString(repo.Name) || repo.URL != "https://github.com/"+repo.Name || repo.Private == nil {
 		return errors.New("setup requires a current repository hosted on github.com")
 	}
+	if !*repo.Private {
+		fmt.Fprintf(s.output, "Repository: %s\nVisibility: Public (unmetered)\n\nSetup is not required for public repositories.\n", repo.Name)
+		return nil
+	}
 	owner, _, _ := strings.Cut(repo.Name, "/")
-	if repo.Private {
-		if _, err := s.gh.Run(ctx, []string{"auth", "status", "--hostname", "github.com"}, nil); err != nil {
-			return errors.New("authenticate GitHub CLI first with gh auth login --hostname github.com")
-		}
-		if err := s.checkOwner(ctx, owner); err != nil {
-			return err
-		}
+	if _, err := s.gh.Run(ctx, []string{"auth", "status", "--hostname", "github.com"}, nil); err != nil {
+		return errors.New("authenticate GitHub CLI first with gh auth login --hostname github.com")
+	}
+	if err := s.checkOwner(ctx, owner); err != nil {
+		return err
 	}
 
 	fmt.Fprintf(s.output, "Repository: %s\n", repo.Name)
@@ -102,15 +105,6 @@ func (s *setup) run(ctx context.Context) error {
 		fmt.Fprintf(s.output, "Created %s\n", workflowPath)
 	} else {
 		fmt.Fprintf(s.output, "%s already exists\n", workflowPath)
-	}
-
-	if !repo.Private {
-		fmt.Fprintf(s.output, "Public repository: %s is not required.\n", secretName)
-		if err := initializeWorkflows(s.root, s.input, s.output); err != nil {
-			return err
-		}
-		fmt.Fprintln(s.output, "\nQuota setup complete. Jobs without quota conditions must be configured manually if you want to gate them.")
-		return nil
 	}
 
 	fmt.Fprintln(s.output, "Private repository: requesting gh-actions-quota Account Plan read access...")

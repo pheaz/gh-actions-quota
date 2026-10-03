@@ -13,7 +13,7 @@ const credentialService = "gh-actions-quota"
 
 var errCredentialNotFound = errors.New("credential not found")
 var errCredentialStoreUnavailable = errors.New("secure credential store unavailable")
-var errAuthorizedAccountMismatch = errors.New("the authorized personal GitHub account must be the repository owner; run setup again and authorize as the owner")
+var errAuthorizedAccountMismatch = errors.New("the authorized personal GitHub account must match the quota account; run the command again and authorize as that account")
 
 var credentialTokenPattern = regexp.MustCompile(`^ghu_[A-Za-z0-9_]+$`)
 

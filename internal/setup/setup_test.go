@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -18,24 +19,31 @@ type ghCall struct {
 	stdin string
 }
 type fakeGH struct {
-	calls     []ghCall
-	ownerType string
-	public    bool
-	failAt    int
+	calls        []ghCall
+	ownerType    string
+	repository   string
+	repoResponse string
+	currentUser  string
+	public       bool
+	failAt       int
 }
 
 type fakeCredentialStore struct {
-	token     string
-	loadErr   error
-	saveErr   error
-	deleteErr error
-	loads     int
-	saves     int
-	deletes   int
+	token           string
+	loadErr         error
+	saveErr         error
+	deleteErr       error
+	loads           int
+	saves           int
+	deletes         int
+	loadedAccounts  []string
+	savedAccounts   []string
+	deletedAccounts []string
 }
 
-func (s *fakeCredentialStore) Load(context.Context, string) (string, error) {
+func (s *fakeCredentialStore) Load(_ context.Context, account string) (string, error) {
 	s.loads++
+	s.loadedAccounts = append(s.loadedAccounts, account)
 	if s.loadErr != nil {
 		return "", s.loadErr
 	}
@@ -45,8 +53,9 @@ func (s *fakeCredentialStore) Load(context.Context, string) (string, error) {
 	return s.token, nil
 }
 
-func (s *fakeCredentialStore) Save(_ context.Context, _ string, token string) error {
+func (s *fakeCredentialStore) Save(_ context.Context, account string, token string) error {
 	s.saves++
+	s.savedAccounts = append(s.savedAccounts, account)
 	if s.saveErr != nil {
 		return s.saveErr
 	}
@@ -54,8 +63,9 @@ func (s *fakeCredentialStore) Save(_ context.Context, _ string, token string) er
 	return nil
 }
 
-func (s *fakeCredentialStore) Delete(context.Context, string) error {
+func (s *fakeCredentialStore) Delete(_ context.Context, account string) error {
 	s.deletes++
+	s.deletedAccounts = append(s.deletedAccounts, account)
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
@@ -75,12 +85,25 @@ func (g *fakeGH) Run(_ context.Context, args []string, input io.Reader) ([]byte,
 	}
 	switch args[0] {
 	case "repo":
+		if g.repoResponse != "" {
+			return []byte(g.repoResponse), nil
+		}
+		repository := g.repository
+		if repository == "" {
+			repository = "owner/repo"
+		}
 		privacy := "true"
 		if g.public {
 			privacy = "false"
 		}
-		return []byte(`{"nameWithOwner":"owner/repo","url":"https://github.com/owner/repo","isPrivate":` + privacy + `}`), nil
+		return []byte(`{"nameWithOwner":"` + repository + `","url":"https://github.com/` + repository + `","isPrivate":` + privacy + `}`), nil
 	case "api":
+		if args[1] == "user" {
+			if g.currentUser != "" {
+				return []byte(g.currentUser), nil
+			}
+			return []byte(`{"login":"signed-in","type":"User"}`), nil
+		}
 		if g.ownerType != "" {
 			return []byte(g.ownerType), nil
 		}
@@ -171,32 +194,49 @@ func TestOrganizationRejectedBeforeDeviceFlow(t *testing.T) {
 	}
 }
 
-func TestPublicRepositorySkipsAuthorizationAndSecretWrite(t *testing.T) {
-	gh := &fakeGH{public: true, ownerType: "Organization"}
-	s, output, requests := setupFixture(t, gh, validAccount, 0)
-	s.browser = func(context.Context, string) error { t.Fatal("public setup opened browser"); return nil }
-	s.clipboard = func(context.Context, string) error { t.Fatal("public setup wrote clipboard"); return nil }
-	if err := s.run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if *requests != 0 {
-		t.Fatalf("public repository unexpectedly used device or billing API: %d requests", *requests)
-	}
-	if !reflect.DeepEqual(gh.calls, []ghCall{
-		{args: []string{"--version"}},
-		{args: []string{"repo", "view", "--json", "nameWithOwner,url,isPrivate"}},
-	}) {
-		t.Fatalf("unexpected public setup gh calls: %v", gh.calls)
-	}
-	for _, call := range gh.calls {
-		if len(call.args) > 0 && (call.args[0] == "api" || call.args[0] == "secret") {
-			t.Fatalf("public setup unexpectedly called gh %s", call.args[0])
-		}
-	}
-	for _, text := range []string{"Public repository:", "ACTIONS_QUOTA_TOKEN is not required", workflowPath, "No existing workflow files found."} {
-		if !strings.Contains(output.String(), text) {
-			t.Errorf("missing public setup output %q", text)
-		}
+func TestPublicSetupIsNoOp(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint("existing workflows=", existing), func(t *testing.T) {
+			gh := &fakeGH{public: true, ownerType: "Organization", repository: "some-org/example"}
+			s, output, requests := setupFixture(t, gh, validAccount, 0)
+			s.browser = func(context.Context, string) error { t.Fatal("public setup opened browser"); return nil }
+			s.clipboard = func(context.Context, string) error { t.Fatal("public setup wrote clipboard"); return nil }
+			store := s.credentials.(*fakeCredentialStore)
+			store.token = fakeToken
+			if existing {
+				dir := filepath.Join(s.root, ".github", "workflows")
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range []string{"ci.yml", "build.yaml", "gh-actions-quota.yml"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte("# existing custom workflow\njobs:\n  build:\n    runs-on: ubuntu-latest\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			before := repositorySnapshot(t, s.root)
+			if err := s.run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if *requests != 0 {
+				t.Fatalf("public setup used device or billing API: %d requests", *requests)
+			}
+			if store.loads != 0 || store.saves != 0 || store.deletes != 0 || store.token != fakeToken {
+				t.Fatal("public setup accessed credentials")
+			}
+			if !reflect.DeepEqual(gh.calls, []ghCall{
+				{args: []string{"--version"}},
+				{args: []string{"repo", "view", "--json", "nameWithOwner,url,isPrivate"}},
+			}) {
+				t.Fatalf("unexpected public setup gh calls: %v", gh.calls)
+			}
+			if output.String() != "Repository: some-org/example\nVisibility: Public (unmetered)\n\nSetup is not required for public repositories.\n" {
+				t.Fatalf("wrong public setup output: %s", output)
+			}
+			if !reflect.DeepEqual(before, repositorySnapshot(t, s.root)) {
+				t.Fatal("public setup created or modified repository files")
+			}
+		})
 	}
 }
 

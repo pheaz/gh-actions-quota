@@ -27,11 +27,21 @@ repository-scoped, so other private repositories owned by the same personal
 account can reuse it without another device login.
 
 For a **public repository**, standard GitHub-hosted runners are unmetered. Setup
-therefore skips GitHub App authorization and does not create
-`ACTIONS_QUOTA_TOKEN`; it only installs and configures the workflow integration.
+prints the repository and its visibility, reports that setup is not required,
+and exits successfully. It performs no GitHub App authorization or credential
+access, creates no secrets or workflow files, and leaves existing workflows
+unchanged without opening workflow selection:
 
-Setup also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable
-workflow that wraps the quota action with a default threshold of 50 percent.
+```text
+Repository: some-org/example
+Visibility: Public (unmetered)
+
+Setup is not required for public repositories.
+```
+
+For private repositories, setup also creates
+**`.github/workflows/gh-actions-quota.yml`**, a reusable workflow that wraps the
+quota action with a default threshold of 50 percent.
 The Action name, reusable workflow name, job ID/name and step ID are all
 `gh-actions-quota`. Re-running setup leaves an identical generated file unchanged
 and refuses to overwrite any file that differs from the current template.
@@ -91,7 +101,7 @@ be adjusted there. Jobs that you leave unselected must be configured manually
 if you want them to be gated.
 
 The project never saves the token to a plaintext file, passes it in command
-arguments or prints it. For private-repository CLI use it persists the token only
+arguments or prints it. For setup and status it persists the token only
 in the operating system's secure credential store: macOS Keychain, Windows
 Credential Manager, or the Linux Secret Service via `secret-tool`. If secure
 storage is unavailable, the command still works with an in-memory token and asks
@@ -100,39 +110,56 @@ secret writes continue to pipe the token to `gh secret set` through stdin.
 There is no server, central token store or telemetry.
 
 Organization-owned repositories are **not supported for metered billing in v1**.
-Public repositories using standard GitHub-hosted runners need no setup or token.
+Public repositories using standard GitHub-hosted runners need no workflow setup
+or repository token. Status can still show a personal account's private quota
+from a public repository, including one owned by an organization.
 
 ## Status
 
 Run `gh actions-quota status` from a repository checkout. For a public repository,
-it makes no device authorization or billing requests:
+status determines the personal account currently signed in with `gh` on
+github.com (via `gh api user`) and shows that account's plan and private Actions
+usage. It uses this account even when the public repository belongs to another
+user or an organization:
 
 ```text
-Repository: owner/repo
-Visibility: public
-Actions quota: unmetered
-```
-
-For a private repository, status reuses the owning personal account's cached
-GitHub App authorization. The device flow is shown only when no usable credential
-exists, when it was revoked, or when secure storage was unavailable on the
-previous run. Fresh device codes use the same clipboard behavior as setup.
-Status then shows:
-
-```text
-Repository: owner/repo
-Visibility: private
-
-Plan: free
+Repository: some-org/example
+Visibility: Public (unmetered)
 
 Actions quota:
-  Used:       742.33 / 2000 min
-  Remaining: 1257.67 min
-  Usage:      37.12%
+  Account: philippwallrafen
+  Plan:    Free
+  Used:    742.33 / 2000 min  ( 37.12% )
 ```
 
-Remaining minutes never fall below zero. Status is read-only with respect to the
-repository: it changes no repository files or secrets and never logs the token.
+For a private repository, status shows the repository owner's personal account
+quota, regardless of the current `gh` account. Organization-owned private
+repositories remain unsupported:
+
+```text
+Repository: philippwallrafen/example
+Visibility: Private (metered)
+
+Actions quota:
+  Account: philippwallrafen
+  Plan:    Free
+  Used:    742.33 / 2000 min  ( 37.12% )
+```
+
+Visibility describes the repository: public repositories do not consume private
+Actions quota on standard GitHub-hosted runners; private repositories can.
+The quota block always describes the displayed personal account's private
+Actions usage across its repositories, using the current `gh` account for public
+repositories and the repository owner for private repositories.
+
+Both public and private status reuse the relevant account's cached GitHub App
+authorization. The device flow is shown only when no usable credential exists,
+when it was revoked or belongs to the wrong account, or when secure storage was
+unavailable on the previous run. Fresh device codes use the same clipboard
+behavior as setup and valid credentials are stored for reuse across repositories.
+
+Status is read-only with respect to the repository: it changes no repository
+files or secrets and never logs the token.
 A successful fresh authorization may create or replace the account-scoped entry
 in the operating system's secure credential store.
 
@@ -197,8 +224,8 @@ write repository settings. Expiring tokens and refresh-token responses remain
 rejected; the current non-expiring App user token is protected by the OS
 credential store instead.
 
-Credential keys are scoped by GitHub host and owning personal account, so one
-authorization is reused across that account's private repositories on the same
+Credential keys are scoped by GitHub host and personal account, so one
+authorization is reused for setup and status across repositories on the same
 machine. macOS uses Keychain and Windows uses Credential Manager directly. Linux
 uses the Secret Service through the standard `secret-tool` command; when it is
 not installed or no Secret Service is available, gh-actions-quota deliberately
@@ -213,7 +240,7 @@ and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage
 
 ## Quota calculation
 
-The action and CLI read `/users/{owner}/settings/billing/usage` for the current
+The action and CLI read `/users/{account}/settings/billing/usage` for the current
 **UTC calendar month** with `product=Actions`. They count only `unitType=minutes`
 and these standard GitHub-hosted runner SKUs: `actions_linux_slim`,
 `actions_linux`, `actions_linux_arm`, `actions_windows`, `actions_windows_arm`
@@ -223,7 +250,7 @@ in Linux-equivalent minutes.
 Public repositories, larger runners, self-hosted runners, storage and other
 products are excluded. Visibility is cached once per repository. A 404 is
 conservatively counted; other lookup failures or invalid counted discounts fail
-closed. Usage is account-wide across the owner's private repositories.
+closed. Usage is account-wide across the quota account's private repositories.
 Billing data can be delayed or lack repository-level detail; the result depends
 on the available report and is **not a real-time spending limit**.
 
