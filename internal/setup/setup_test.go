@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -103,7 +105,7 @@ func TestSetupSecretWriteUsesOnlyStdin(t *testing.T) {
 	if strings.Contains(output.String(), fakeToken) {
 		t.Fatal("token logged")
 	}
-	for _, text := range []string{"Code copied to clipboard: ABCD-EFGH", "https://github.com/login/device", "2000.00 / 3000", workflowPath, "needs: quota", "Stored repository secret"} {
+	for _, text := range []string{"Code copied to clipboard: ABCD-EFGH", "https://github.com/login/device", "2000.00 / 3000", workflowPath, "Stored repository secret", "No existing workflow files found."} {
 		if !strings.Contains(output.String(), text) {
 			t.Errorf("missing setup output %s", text)
 		}
@@ -173,5 +175,20 @@ func TestBillingValidationAndConversion(t *testing.T) {
 	})
 	if used, err := c.checkBilling(context.Background(), "owner", fakeToken); err != nil || used != 300 {
 		t.Fatal("wrong billing conversion")
+	}
+}
+
+func TestSetupAlwaysInitializesWorkflows(t *testing.T) {
+	s, _, _ := setupFixture(t, &fakeGH{}, validAccount, 0)
+	dir := filepath.Join(s.root, ".github", "workflows")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ci.yml"), []byte("jobs:\n  build:\n    runs-on: ubuntu-latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := s.run(context.Background())
+	if err == nil || err.Error() != "workflow selection requires an interactive terminal" {
+		t.Fatalf("expected workflow selection, got %v", err)
 	}
 }

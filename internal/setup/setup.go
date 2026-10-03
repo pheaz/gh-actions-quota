@@ -19,33 +19,31 @@ const secretName = "ACTIONS_QUOTA_TOKEN"
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
 
-// Run authorizes the app, writes the repository secret, and installs the reusable quota workflow.
-func Run(ctx context.Context, input io.Reader, output io.Writer, initialize bool) error {
+// Run authorizes the app, writes the repository secret, installs the reusable quota workflow, and interactively configures workflow callers.
+func Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return errors.New("could not resolve the current working directory")
 	}
 	return (&setup{
-		gh:         ghRunner{},
-		client:     newClient(),
-		input:      input,
-		output:     output,
-		browser:    openBrowser,
-		clipboard:  copyToClipboard,
-		root:       root,
-		initialize: initialize,
+		gh:        ghRunner{},
+		client:    newClient(),
+		input:     input,
+		output:    output,
+		browser:   openBrowser,
+		clipboard: copyToClipboard,
+		root:      root,
 	}).run(ctx)
 }
 
 type setup struct {
-	gh         runner
-	client     *client
-	input      io.Reader
-	output     io.Writer
-	browser    func(context.Context, string) error
-	clipboard  func(context.Context, string) error
-	root       string
-	initialize bool
+	gh        runner
+	client    *client
+	input     io.Reader
+	output    io.Writer
+	browser   func(context.Context, string) error
+	clipboard func(context.Context, string) error
+	root      string
 }
 
 func (s *setup) run(ctx context.Context) error {
@@ -129,19 +127,11 @@ func (s *setup) run(ctx context.Context) error {
 	}
 	fmt.Fprintf(s.output, "\nPlan: %s\nActions usage: %.2f / %d Linux-equivalent minutes\nStored repository secret: %s\n", plan, used, quota, secretName)
 
-	if s.initialize {
-		if err := initializeWorkflows(s.root, s.input, s.output); err != nil {
-			return err
-		}
+	if err := initializeWorkflows(s.root, s.input, s.output); err != nil {
+		return err
 	}
 
-	fmt.Fprintln(s.output, `
-Gate each expensive job with:
-
-needs: quota
-if: needs.quota.outputs.allowed == 'true'
-
-Run "gh actions-quota setup --init" to interactively add the quota caller to existing workflow files.`)
+	fmt.Fprintln(s.output, "\nQuota setup complete. Jobs without quota conditions must be configured manually if you want to gate them.")
 	return nil
 }
 

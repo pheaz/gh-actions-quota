@@ -14,13 +14,6 @@ gh extension install philippwallrafen/gh-actions-quota
 gh actions-quota setup
 ```
 
-Use `--init` when you also want setup to scan existing workflow files and open
-an interactive checklist for the reusable quota caller:
-
-```shell
-gh actions-quota setup --init
-```
-
 Setup opens GitHub's device authorization page and displays a code. When a
 supported clipboard command is available, the device code is copied to the
 clipboard before the browser opens; otherwise setup simply prints the code.
@@ -34,15 +27,51 @@ workflow that wraps the quota action with a default threshold of 50 percent.
 Re-running setup leaves an identical generated file unchanged; if that path
 contains a modified workflow, setup refuses to overwrite it.
 
-With `--init`, setup additionally scans `.github/workflows/*.yml` and
+Setup also scans `.github/workflows/*.yml` and
 `.github/workflows/*.yaml` (excluding the generated helper) and shows the files
 in an interactive checklist. A leading `*` means that workflow currently has a
 quota caller. Use Up/Down to move, Space to toggle the `*`, and Enter to apply.
 Selecting a file adds the canonical caller with `secrets: inherit`; clearing an
 existing `*` removes that caller job again. A pre-existing different
-`jobs.quota` is never overwritten. The initializer deliberately does not guess
-which existing jobs are expensive; add `needs: quota` and the `allowed`
-condition to the jobs you want to gate.
+`jobs.quota` is never overwritten.
+
+After workflow selection, setup asks **`Add quota conditions to individual jobs?
+[y/n]`**. Press `y` or `n` without Enter. Choosing `y` opens a grouped checklist:
+filenames are headings, with job IDs indented beneath them. Only jobs from the
+selected workflows appear; quota callers are excluded. Use Up/Down, Space and
+Enter as above. Long lists scroll, keeping the current filename and controls
+visible. Ctrl-C cancels this step while preserving the completed workflow
+selection.
+
+Selecting a job adds the quota dependency and an active condition with an
+editable **50% threshold directly in that job's workflow file**:
+
+```yaml
+  build:
+    needs: quota
+    # Quota threshold (%): change 50 below to adjust this job's limit.
+    if: ${{ needs.quota.outputs.usage_available == 'true' && fromJSON(needs.quota.outputs.usage_percent) < 50 }}
+    runs-on: ubuntu-latest
+```
+
+Change `50` in each job's condition to adjust its limit. Different jobs in the
+same workflow can use different thresholds. Jobs compare reported usage directly
+with their own limits, so a 75% job can run even when the reusable helper's
+50% `allowed` output is false. Exactly at or above the job's threshold, or when
+usage is unavailable, the job is skipped.
+
+Setup preserves existing dependencies and combines existing conditions with the
+quota condition using a parenthesized AND. Recognizable quota gates start
+selected; clearing them removes the quota gate and dependency while retaining
+unrelated conditions and dependencies. Re-running setup preserves edited job
+thresholds. Existing canonical `allowed` gates migrate using the caller's literal
+threshold, or 50% when no override exists. Dynamic thresholds, complex custom
+quota expressions, and YAML constructs that cannot be safely edited appear
+as disabled entries with a manual-editing explanation.
+
+Setup lists the configured workflow files and reminds you that thresholds can
+be adjusted there. Jobs that you leave unselected must be configured manually
+if you want them to be gated.
 
 The project never saves the token to a local file, passes it in command arguments
 or prints it. It remains in memory and is piped to `gh secret set` through stdin.
@@ -71,7 +100,8 @@ jobs:
 
   expensive-ci:
     needs: quota
-    if: needs.quota.outputs.allowed == 'true'
+    # Quota threshold (%): change 50 below to adjust this job's limit.
+    if: ${{ needs.quota.outputs.usage_available == 'true' && fromJSON(needs.quota.outputs.usage_percent) < 50 }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
@@ -177,7 +207,8 @@ The action uses strict TypeScript and esbuild, targeting Node.js 24. Its complet
 bundle is committed at `dist/index.js`; `action.yml` runs it with `node24`.
 Node.js and the JavaScript package manager are development/build tools only.
 The extension uses Go 1.27.1 or newer. It uses `golang.org/x/term` for the
-cross-platform interactive `--init` checklist.
+cross-platform interactive workflow and job checklists, and `go.yaml.in/yaml/v3`
+for structural validation and targeted YAML edits.
 
 After installing the locked development dependencies, validate the action with:
 

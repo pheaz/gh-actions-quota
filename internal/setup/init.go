@@ -41,7 +41,7 @@ func initializeWorkflows(root string, input io.Reader, output io.Writer) error {
 
 	file, ok := input.(*os.File)
 	if !ok || !term.IsTerminal(int(file.Fd())) {
-		return errors.New("--init requires an interactive terminal")
+		return errors.New("workflow selection requires an interactive terminal")
 	}
 	if err := selectWorkflowChoices(file, output, choices); err != nil {
 		return err
@@ -53,13 +53,13 @@ func initializeWorkflows(root string, input io.Reader, output io.Writer) error {
 	}
 	if len(changed) == 0 {
 		fmt.Fprintln(output, "\nNo workflow changes.")
-		return nil
+	} else {
+		fmt.Fprintln(output, "\nUpdated workflows:")
+		for _, path := range changed {
+			fmt.Fprintf(output, "  %s\n", path)
+		}
 	}
-	fmt.Fprintln(output, "\nUpdated workflows:")
-	for _, path := range changed {
-		fmt.Fprintf(output, "  %s\n", path)
-	}
-	return nil
+	return initializeJobs(root, file, output, choices)
 }
 
 func scanWorkflowChoices(root string) ([]workflowChoice, error) {
