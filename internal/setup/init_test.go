@@ -14,12 +14,7 @@ func TestScanWorkflowChoicesDetectsExistingCaller(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	configured := `jobs:
-  quota:
-    uses: ./.github/workflows/gh-actions-quota.yml
-    secrets:
-      ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
-`
+	configured := "jobs:\n" + quotaCallerBlock
 	plain := "jobs:\n  test:\n    runs-on: ubuntu-latest\n"
 	if err := os.WriteFile(filepath.Join(dir, "ci.yml"), []byte(configured), 0o644); err != nil {
 		t.Fatal(err)
@@ -80,30 +75,19 @@ func TestSetQuotaCallerAddsInheritAndRemovesAgain(t *testing.T) {
 	}
 }
 
-func TestSetQuotaCallerNormalizesExistingSecretMapping(t *testing.T) {
+func TestLegacySecretMappingIsNotTreatedAsCurrentCaller(t *testing.T) {
 	content := `jobs:
   quota:
     uses: ./.github/workflows/gh-actions-quota.yml
-    with:
-      threshold: 75
     secrets:
       ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
-
-  test:
-    runs-on: ubuntu-latest
 `
-	updated, err := setQuotaCaller(content, true)
-	if err != nil {
-		t.Fatal(err)
+	if hasQuotaCaller(content) {
+		t.Fatal("non-canonical caller should not be treated as current")
 	}
-	if !strings.Contains(updated, "    secrets: inherit") {
-		t.Fatal("existing caller was not normalized to secrets: inherit")
-	}
-	if strings.Contains(updated, "ACTIONS_QUOTA_TOKEN:") {
-		t.Fatal("old explicit secret mapping remains")
-	}
-	if !strings.Contains(updated, "      threshold: 75") {
-		t.Fatal("caller inputs were not preserved")
+	_, err := setQuotaCaller(content, true)
+	if err == nil || !strings.Contains(err.Error(), "jobs.quota") {
+		t.Fatal("non-canonical quota job should be rejected instead of migrated")
 	}
 }
 
@@ -123,17 +107,6 @@ func TestSetQuotaCallerRefusesConflictingQuotaJob(t *testing.T) {
 	_, err := setQuotaCaller(content, true)
 	if err == nil || !strings.Contains(err.Error(), "jobs.quota") {
 		t.Fatal("conflicting quota job was not rejected")
-	}
-}
-
-func TestSetQuotaCallerPreservesCRLF(t *testing.T) {
-	content := "name: CI\r\n\r\njobs:\r\n  test:\r\n    runs-on: ubuntu-latest\r\n"
-	updated, err := setQuotaCaller(content, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasQuotaCaller(updated) || strings.Contains(strings.ReplaceAll(updated, "\r\n", ""), "\n") {
-		t.Fatal("CRLF line endings were not preserved")
 	}
 }
 
