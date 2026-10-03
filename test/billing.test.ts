@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { API_VERSION } from "../src/constants.js";
 import { fetchPlan, fetchUsedMinutes, includedMinutesForPlan, parseUsedMinutes } from "../src/billing.js";
 
@@ -7,6 +8,45 @@ const fakeToken = "test-only-token";
 const privateRepository: typeof fetch = async () => new Response(JSON.stringify({ private: true }));
 function item(discountAmount: unknown, overrides: Record<string, unknown> = {}) {
   return { product: "Actions", unitType: "minutes", sku: "actions_linux", repositoryName: "owner/private", discountAmount, ...overrides };
+}
+
+// The Go CLI reads this same corpus so both implementations keep the same contract.
+const billingCases: {
+  name: string;
+  usageItems: unknown[];
+  repositories: Record<string, { status: number; private?: boolean }>;
+  usedMinutes?: number;
+  error?: string;
+  lookups: Record<string, number>;
+}[] = JSON.parse(readFileSync("test/fixtures/billing.json", "utf8"));
+
+for (const fixture of billingCases) {
+  test(`shared billing contract: ${fixture.name}`, async () => {
+    const lookups: Record<string, number> = {};
+    const fetchImpl: typeof fetch = async url => {
+      const request = new URL(String(url));
+      if (request.pathname === "/users/owner/settings/billing/usage") {
+        assert.equal(request.searchParams.get("year"), "2026");
+        assert.equal(request.searchParams.get("month"), "8");
+        assert.equal(request.searchParams.get("product"), "Actions");
+        return new Response(JSON.stringify({ usageItems: fixture.usageItems }));
+      }
+      const repository = request.pathname.replace(/^\/repos\//, "");
+      const response = fixture.repositories[repository];
+      assert.ok(response, `unexpected endpoint: ${request.pathname}`);
+      lookups[repository] = (lookups[repository] || 0) + 1;
+      return new Response(JSON.stringify({ private: response.private }), { status: response.status });
+    };
+    const used = () => fetchUsedMinutes("owner", fakeToken, {
+      ownerType: "user", now: new Date("2026-09-01T00:30:00+02:00"), fetchImpl,
+    });
+    if (fixture.error) {
+      await assert.rejects(used, { message: fixture.error });
+    } else {
+      assert.equal(await used(), fixture.usedMinutes);
+    }
+    assert.deepEqual(lookups, fixture.lookups);
+  });
 }
 
 test("mixed runner discounts normalize to Linux-equivalent minutes", async () => {

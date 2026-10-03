@@ -30,7 +30,7 @@ outputs:
   billing-owner:
     description: Repository owner whose Actions quota is charged.
   billing-owner-type:
-    description: user or organization.
+    description: user, unmetered, or unavailable.
   unmetered:
     description: Whether standard GitHub-hosted runners are unmetered because the repository is public.
 

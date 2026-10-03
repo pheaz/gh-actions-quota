@@ -23,12 +23,6 @@ type workflowChoice struct {
 	selected bool
 }
 
-type jobBlock struct {
-	id    string
-	start int
-	end   int
-}
-
 func initializeWorkflows(root string, input io.Reader, output io.Writer) error {
 	choices, err := scanWorkflowChoices(root)
 	if err != nil {
@@ -89,7 +83,11 @@ func scanWorkflowChoices(root string) ([]workflowChoice, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: could not read workflow", relative)
 		}
-		choices = append(choices, workflowChoice{path: relative, selected: hasQuotaCaller(string(data))})
+		document, err := parseWorkflow(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", relative, err)
+		}
+		choices = append(choices, workflowChoice{path: relative, selected: document.caller == quotaJobID})
 	}
 	sort.Slice(choices, func(i, j int) bool { return choices[i].path < choices[j].path })
 	return choices, nil
@@ -225,107 +223,52 @@ func applyWorkflowChoices(root string, choices []workflowChoice) ([]string, erro
 }
 
 func hasQuotaCaller(content string) bool {
-	_, callers, _ := analyzeJobs(strings.Split(content, "\n"))
-	return len(callers) > 0
+	document, err := parseWorkflow(content)
+	return err == nil && document.caller == quotaJobID
 }
 
 func setQuotaCaller(content string, selected bool) (string, error) {
-	lines := strings.Split(content, "\n")
-	if selected {
-		if _, err := parseWorkflow(content); err != nil {
-			return "", err
+	w, err := parseWorkflow(content)
+	if err != nil {
+		if !selected && errors.Is(err, errNoJobs) {
+			return content, nil
 		}
+		return "", err
 	}
-	jobsIndex, callers, blocks := analyzeJobs(lines)
-	if !selected && len(callers) == 0 {
+	if selected == (w.caller == quotaJobID) {
 		return content, nil
-	}
-	if jobsIndex < 0 {
-		return "", errors.New("workflow has no top-level jobs: key")
-	}
-	if len(callers) > 1 {
-		return "", errors.New("workflow defines multiple gh-actions-quota callers")
 	}
 
 	if !selected {
-		caller := callers[0]
-		result := append([]string{}, lines[:caller.start]...)
-		result = append(result, lines[caller.end:]...)
-		return strings.Join(result, "\n"), nil
-	}
-
-	if len(callers) == 1 {
-		return migrateQuotaCaller(content)
-	}
-
-	for _, block := range blocks {
-		if block.id == quotaJobID {
-			return "", errors.New("workflow already defines jobs.gh-actions-quota with different content")
-		}
-	}
-
-	blockLines := strings.Split(strings.TrimSuffix(quotaCallerBlock, "\n"), "\n")
-	result := make([]string, 0, len(lines)+len(blockLines))
-	result = append(result, lines[:jobsIndex+1]...)
-	result = append(result, blockLines...)
-	result = append(result, lines[jobsIndex+1:]...)
-	return strings.Join(result, "\n"), nil
-}
-
-func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
-	jobsIndex := -1
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "jobs:" && leadingSpaces(line) == 0 {
-			jobsIndex = i
-			break
-		}
-	}
-	if jobsIndex < 0 {
-		return -1, nil, nil
-	}
-
-	sectionEnd := len(lines)
-	var starts []int
-	for i := jobsIndex + 1; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		indent := leadingSpaces(lines[i])
-		if indent == 0 {
-			sectionEnd = i
-			break
-		}
-		if indent == 2 && strings.HasSuffix(strings.TrimSpace(strings.SplitN(trimmed, "#", 2)[0]), ":") {
-			starts = append(starts, i)
-		}
-	}
-
-	var blocks []jobBlock
-	var callers []jobBlock
-	document, _ := parseWorkflow(strings.Join(lines, "\n"))
-	for index, start := range starts {
-		end := sectionEnd
-		if index+1 < len(starts) {
-			end = starts[index+1]
+		key, _ := mappingValue(w.jobs, quotaJobID)
+		start, end := key.Line-1, key.Line
+		for end < len(w.lines) {
+			trimmed := strings.TrimSpace(w.lines[end])
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") && leadingSpaces(w.lines[end]) < key.Column {
+				break
+			}
+			end++
 		}
 		for end > start+1 {
-			trimmed := strings.TrimSpace(lines[end-1])
+			trimmed := strings.TrimSpace(w.lines[end-1])
 			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
 				break
 			}
 			end--
 		}
-		id := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.SplitN(strings.TrimSpace(lines[start]), "#", 2)[0]), ":"))
-		id = strings.Trim(id, "'\"")
-		block := jobBlock{id: id, start: start, end: end}
-		blocks = append(blocks, block)
-		if document != nil && id == document.caller {
-			callers = append(callers, block)
+		return w.applyEdits([]lineEdit{{start: start, end: end}})
+	}
+
+	blockLines := strings.Split(strings.TrimSuffix(quotaCallerBlock, "\n"), "\n")
+	if len(w.jobs.Content) > 0 {
+		indent := strings.Repeat(" ", w.jobs.Content[0].Column-1)
+		for i, line := range blockLines {
+			if line != "" {
+				blockLines[i] = indent + strings.TrimPrefix(line, "  ")
+			}
 		}
 	}
-	return jobsIndex, callers, blocks
+	return w.applyEdits([]lineEdit{{start: w.jobsLine + 1, end: w.jobsLine + 1, lines: blockLines}})
 }
 
 func leadingSpaces(line string) int {

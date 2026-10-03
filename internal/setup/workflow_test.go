@@ -1,7 +1,6 @@
 package setup
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,63 +78,37 @@ func TestEnsureReusableWorkflowRefusesModifiedFile(t *testing.T) {
 	}
 }
 
-func TestEnsureReusableWorkflowMigratesLegacyTemplate(t *testing.T) {
-	legacy, err := os.ReadFile("testdata/legacy-gh-actions-quota.yml")
+func TestEnsureReusableWorkflowRefusesPreviousTemplate(t *testing.T) {
+	previous, err := os.ReadFile("testdata/legacy-gh-actions-quota.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(legacy) != legacyReusableWorkflow {
-		t.Fatal("legacy template recognition differs from the previous generated file")
-	}
-	for _, custom := range []bool{false, true} {
-		t.Run(fmt.Sprint(custom), func(t *testing.T) {
-			root := t.TempDir()
-			path := filepath.Join(root, filepath.FromSlash(workflowPath))
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-				t.Fatal(err)
-			}
-			content := string(legacy)
-			if custom {
-				content = strings.Replace(content, "default: 50", "default: 75", 1)
-			}
-			if err := os.WriteFile(path, []byte(content), 0640); err != nil {
-				t.Fatal(err)
-			}
-			// Compare the actual mode: Windows does not implement Unix permission bits,
-			// and a Unix umask can alter the requested creation mode.
-			before, err := os.Stat(path)
-			if err != nil {
-				t.Fatal(err)
-			}
+	for _, content := range []string{string(previous), strings.Replace(string(previous), "default: 50", "default: 75", 1)} {
+		root := t.TempDir()
+		path := filepath.Join(root, filepath.FromSlash(workflowPath))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0640); err != nil {
+			t.Fatal(err)
+		}
+		before, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for attempt := 0; attempt < 2; attempt++ {
 			changed, err := ensureReusableWorkflow(root)
-			if custom {
-				if err == nil || changed {
-					t.Fatal("customized legacy template was overwritten")
-				}
-			} else if err != nil || !changed {
-				t.Fatalf("migration failed: %v", err)
+			if err == nil || changed || !strings.Contains(err.Error(), "differs from the generated template") {
+				t.Fatalf("previous helper was accepted: changed=%v err=%v", changed, err)
 			}
 			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := reusableWorkflow
-			if custom {
-				want = content
-			}
-			if string(data) != want {
-				t.Fatal("unexpected workflow content")
+			if err != nil || string(data) != content {
+				t.Fatal("previous helper was modified")
 			}
 			info, err := os.Stat(path)
-			if err != nil || info.Mode().Perm() != before.Mode().Perm() {
-				t.Fatal("file permissions changed")
+			if err != nil || info.Mode().Perm() != before.Mode().Perm() || !info.ModTime().Equal(before.ModTime()) {
+				t.Fatal("previous helper was rewritten")
 			}
-			if !custom {
-				changed, err = ensureReusableWorkflow(root)
-				if err != nil || changed {
-					t.Fatal("migration is not idempotent")
-				}
-			}
-		})
+		}
 	}
 }

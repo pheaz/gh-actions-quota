@@ -30,22 +30,24 @@ Setup also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable
 workflow that wraps the quota action with a default threshold of 50 percent.
 The Action name, reusable workflow name, job ID/name and step ID are all
 `gh-actions-quota`. Re-running setup leaves an identical generated file unchanged
-and upgrades the previous unchanged generated template to this naming. If that
-path contains a modified workflow, setup refuses to overwrite it.
+and refuses to overwrite any file that differs from the current template.
 
 Setup also scans `.github/workflows/*.yml` and
 `.github/workflows/*.yaml` (excluding the generated helper) and shows the files
 in an interactive checklist. A leading `*` means that workflow currently has a
 quota caller. Use Up/Down to move, Space to toggle the `*`, and Enter to apply.
-Selecting a file adds the canonical caller with `secrets: inherit`; clearing an
-existing `*` removes that caller job again. A pre-existing different
-`jobs.gh-actions-quota` is never overwritten. Existing callers of this reusable
-workflow, including older `jobs.quota` callers without `secrets: inherit`, are
-recognized and renamed to `gh-actions-quota` together with their dependencies
-and recognizable gates, before the optional job checklist. Setup migrates the
-existing job instead of adding another caller; it preserves unrelated jobs,
-conditions, comments and edited thresholds. Conflicting job IDs or custom quota
-references that cannot be migrated safely require manual editing.
+Selecting a file adds this canonical caller; clearing an existing `*` removes it:
+
+```yaml
+jobs:
+  gh-actions-quota:
+    uses: ./.github/workflows/gh-actions-quota.yml
+    secrets: inherit
+```
+
+Setup recognizes only this job ID with these two fields. A different
+`jobs.gh-actions-quota` produces an error and must be edited manually.
+Unrelated jobs, dependencies, conditions and comments are preserved.
 
 After workflow selection, setup asks **`Add quota conditions to individual jobs?
 [y/n]`**. Press `y` or `n` without Enter. Choosing `y` opens a grouped checklist:
@@ -76,10 +78,9 @@ Setup preserves existing dependencies and combines existing conditions with the
 quota condition using a parenthesized AND. Recognizable quota gates start
 selected; clearing them removes the quota gate and dependency while retaining
 unrelated conditions and dependencies. Re-running setup preserves edited job
-thresholds. Existing canonical `allowed` gates migrate using the caller's literal
-threshold, or 50% when no override exists. Dynamic thresholds, complex custom
-quota expressions, and YAML constructs that cannot be safely edited appear
-as disabled entries with a manual-editing explanation.
+thresholds. Custom quota expressions, including conditions based on `allowed`,
+and YAML constructs that cannot be safely edited appear as disabled entries
+with a manual-editing explanation.
 
 Setup lists the configured workflow files and reminds you that thresholds can
 be adjusted there. Jobs that you leave unselected must be configured manually
@@ -95,12 +96,33 @@ Public repositories using standard GitHub-hosted runners need no setup or token.
 
 ## Status
 
-Run `gh actions-quota status` from a repository checkout to show its visibility
-and Actions quota. Public repositories report `unmetered` without authorization
-or billing requests. Private repositories use the same GitHub App device flow
-as setup and show the owner's plan, used/quota minutes, remaining minutes and
-usage percentage. Status is read-only: it changes no repository files or secrets
-and keeps the token only in memory.
+Run `gh actions-quota status` from a repository checkout. For a public repository,
+it makes no device authorization or billing requests:
+
+```text
+Repository: owner/repo
+Visibility: public
+Actions quota: unmetered
+```
+
+For a private repository, authorize the owning personal account through the
+GitHub App device flow. After the authorization prompts, status shows:
+
+```text
+Repository: owner/repo
+Visibility: private
+
+Plan: free
+
+Actions quota:
+  Used:       742.33 / 2000 min
+  Remaining: 1257.67 min
+  Usage:      37.12%
+```
+
+Remaining minutes never fall below zero. Status is read-only: it changes no
+repository files, secrets or local credentials, never logs the token, and
+keeps it only in memory for the command's lifetime.
 
 ## Workflow
 
@@ -130,8 +152,8 @@ jobs:
 ```
 
 The generated reusable workflow runs its quota check on `ubuntu-slim` and
-defaults to a 50 percent threshold. Override it on the reusable-workflow call
-with `with: { threshold: 75 }` when needed.
+defaults to a 50 percent threshold. Setup keeps the caller in the canonical
+format above; change the limit directly in each gated job's condition.
 Usage below the threshold gives `allowed=true`. **Exactly at the threshold or
 above it, `allowed=false`.** Billing
 belongs to `GITHUB_REPOSITORY_OWNER`, never the actor or pull request author.
@@ -170,15 +192,19 @@ and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage
 
 ## Quota calculation
 
-The action and CLI read the current **UTC calendar month's** Actions usage report
-for the repository owner's account. They sum `discountAmount` only for
-`product=Actions`, `unitType=minutes` and standard GitHub-hosted runner SKUs,
-then divide by **`$0.006/min`** to calculate Linux-equivalent included minutes.
+The action and CLI read `/users/{owner}/settings/billing/usage` for the current
+**UTC calendar month** with `product=Actions`. They count only `unitType=minutes`
+and these standard GitHub-hosted runner SKUs: `actions_linux_slim`,
+`actions_linux`, `actions_linux_arm`, `actions_windows`, `actions_windows_arm`
+and `actions_macos`. Included usage is `sum(discountAmount) / 0.006`, expressed
+in Linux-equivalent minutes.
+
 Public repositories, larger runners, self-hosted runners, storage and other
-products are excluded. Repository visibility is checked once per repository;
-a 404 is conservatively counted. Usage is account-wide across private repositories.
-Billing data may arrive with a delay, so this is a gate based on
-reported usage rather than a real-time spending limit.
+products are excluded. Visibility is cached once per repository. A 404 is
+conservatively counted; other lookup failures or invalid counted discounts fail
+closed. Usage is account-wide across the owner's private repositories.
+Billing data can be delayed or lack repository-level detail; the result depends
+on the available report and is **not a real-time spending limit**.
 
 | Plan | Included monthly minutes |
 | --- | ---: |
@@ -236,9 +262,10 @@ for structural validation and targeted YAML edits.
 After installing the locked development dependencies, validate the action with:
 
 ```shell
-node --run typecheck
-node --run test
-node --run build
+npm ci
+npm run typecheck
+npm test
+npm run build
 git diff --exit-code -- dist/
 ```
 
@@ -248,7 +275,7 @@ Validate and build the extension:
 go vet ./...
 go test -race ./...
 go build ./cmd/gh-actions-quota
-bash scripts/build-release.sh v1.0.0
+node --test scripts/release.test.mjs
 ```
 
 For local extension testing, build the executable at the repository root:

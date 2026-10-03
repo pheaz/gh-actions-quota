@@ -6,11 +6,71 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+// The TypeScript action reads the same cases to prevent billing behavior drift.
+func TestSharedBillingContract(t *testing.T) {
+	data, err := os.ReadFile("../../test/fixtures/billing.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []struct {
+		Name         string          `json:"name"`
+		UsageItems   json.RawMessage `json:"usageItems"`
+		Repositories map[string]struct {
+			Status  int  `json:"status"`
+			Private bool `json:"private"`
+		} `json:"repositories"`
+		UsedMinutes float64        `json:"usedMinutes"`
+		Error       string         `json:"error"`
+		Lookups     map[string]int `json:"lookups"`
+	}
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			lookups := map[string]int{}
+			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/users/owner/settings/billing/usage" {
+					if r.URL.Query().Get("year") != "2026" || r.URL.Query().Get("month") != "8" || r.URL.Query().Get("product") != "Actions" {
+						t.Error("wrong billing query or UTC month")
+					}
+					json.NewEncoder(w).Encode(map[string]any{"usageItems": fixture.UsageItems})
+					return
+				}
+				repository := strings.TrimPrefix(r.URL.Path, "/repos/")
+				response, ok := fixture.Repositories[repository]
+				if !ok {
+					t.Errorf("unexpected endpoint: %s", r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				lookups[repository]++
+				w.WriteHeader(response.Status)
+				json.NewEncoder(w).Encode(map[string]bool{"private": response.Private})
+			})
+			now, _ := time.Parse(time.RFC3339, "2026-09-01T00:30:00+02:00")
+			c.now = func() time.Time { return now }
+			used, err := c.checkBilling(context.Background(), "owner", fakeToken)
+			if fixture.Error != "" {
+				if err == nil || err.Error() != fixture.Error {
+					t.Fatalf("billing error = %v, want %s", err, fixture.Error)
+				}
+			} else if err != nil || used != fixture.UsedMinutes {
+				t.Fatalf("used=%v err=%v, want %v", used, err, fixture.UsedMinutes)
+			}
+			if !reflect.DeepEqual(lookups, fixture.Lookups) {
+				t.Fatalf("lookups=%v, want %v", lookups, fixture.Lookups)
+			}
+		})
+	}
+}
 
 func billingItem(discount any, overrides map[string]any) map[string]any {
 	item := map[string]any{"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": discount}

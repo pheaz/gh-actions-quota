@@ -131,37 +131,19 @@ func TestJobGatesPreserveThresholdsAndLineEndings(t *testing.T) {
 	}
 }
 
-func TestLegacyJobGatesUseCallerThreshold(t *testing.T) {
-	for _, threshold := range []string{"", "75", "${{ inputs.threshold }}"} {
-		caller := strings.Replace(quotaCallerBlock, "  gh-actions-quota:", "  billing:", 1)
-		if threshold != "" {
-			caller += "    with:\n      threshold: " + threshold + "\n"
-		}
-		original := "jobs:\n" + caller + "  build:\n    needs: billing\n    if: needs.billing.outputs.allowed == 'true'\n    runs-on: ubuntu-latest\n"
+func TestAllowedOutputConditionsRequireManualEditing(t *testing.T) {
+	for _, condition := range []string{
+		"needs.gh-actions-quota.outputs.allowed == 'true'",
+		"(github.ref == 'refs/heads/main') && (needs.gh-actions-quota.outputs.allowed == 'true')",
+	} {
+		original := jobWorkflow("  build:\n    needs: gh-actions-quota\n    if: " + condition + "\n    runs-on: ubuntu-latest\n")
 		choices := choicesFor(t, original)
-		if !choices[0].selected {
-			t.Fatal("legacy gate not selected")
+		if choices[0].selected || choices[0].disabled == "" {
+			t.Fatal("allowed-output condition was accepted for automatic editing")
 		}
-		if strings.Contains(threshold, "${{") {
-			if choices[0].disabled == "" {
-				t.Fatal("dynamic threshold should be disabled")
-			}
-			unchanged, err := setJobGates(original, choices)
-			if err != nil || unchanged != original {
-				t.Fatal("disabled gate changed")
-			}
-			continue
-		}
-		want := threshold
-		if want == "" {
-			want = "50"
-		}
-		migrated, err := setJobGates(original, choices)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(migrated, quotaExpression("billing", want)) || strings.Contains(migrated, "outputs.allowed") {
-			t.Fatalf("migration failed:\n%s", migrated)
+		unchanged, err := setJobGates(original, choices)
+		if err != nil || unchanged != original {
+			t.Fatal("allowed-output condition was changed")
 		}
 	}
 }
@@ -361,7 +343,7 @@ func TestUnrelatedBracketDependencyConditionCanBeGated(t *testing.T) {
 	}
 }
 
-func TestJobChoicesRespectSelectedFilesAndCallerAncestors(t *testing.T) {
+func TestJobChoicesRespectSelectedFiles(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".github", "workflows")
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -380,9 +362,5 @@ func TestJobChoicesRespectSelectedFilesAndCallerAncestors(t *testing.T) {
 	if len(choices) != 4 || !strings.HasSuffix(choices[0].path, "a.yml") || choices[0].id != "build" || choices[1].id != "test" || !strings.HasSuffix(choices[2].path, "b.yml") {
 		t.Fatalf("bad grouping: %+v", choices)
 	}
-	text = strings.Replace(text, "    secrets: inherit", "    secrets: inherit\n    needs: build", 1)
-	choices = choicesFor(t, text)
-	if choices[0].disabled == "" || choices[1].disabled != "" {
-		t.Fatal("quota caller ancestors not protected")
-	}
+
 }
