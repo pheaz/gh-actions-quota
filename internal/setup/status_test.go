@@ -107,11 +107,12 @@ func TestStatusPublicUsesCurrentPersonalAccount(t *testing.T) {
 				if !reflect.DeepEqual(gh.calls, []ghCall{
 					{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
 					{args: []string{"api", "user", "--hostname", "github.com"}},
+					{args: []string{"secret", "list", "--repo", repository, "--json", "name"}},
 				}) {
 					t.Fatalf("unexpected public gh calls: %v", gh.calls)
 				}
 				wantHeader := "Repository: " + repository + "\nVisibility: Public (unmetered)\n"
-				wantQuota := "\nActions quota:\n  Account: signed-in\n  Plan:    Free\n  Used:    742.33 / 2000 min  ( 37.12% )\n"
+				wantQuota := "\nActions quota:\n  Account: signed-in\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
 				if !strings.HasPrefix(output.String(), wantHeader) || !strings.HasSuffix(output.String(), wantQuota) || (cached && output.String() != wantHeader+wantQuota) {
 					t.Fatalf("wrong public output: %s", output)
 				}
@@ -196,6 +197,7 @@ func TestStatusPrivateUsesDeviceFlowAndStaysReadOnly(t *testing.T) {
 			if !reflect.DeepEqual(gh.calls, []ghCall{
 				{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
 				{args: []string{"api", "users/owner", "--hostname", "github.com", "--jq", ".type"}},
+				{args: []string{"secret", "list", "--repo", "owner/repo", "--json", "name"}},
 			}) {
 				t.Fatalf("status called gh secret set or another unexpected command: %v", gh.calls)
 			}
@@ -204,7 +206,7 @@ func TestStatusPrivateUsesDeviceFlowAndStaysReadOnly(t *testing.T) {
 					t.Errorf("missing status output %q: %s", want, output)
 				}
 			}
-			wantQuota := "\nActions quota:\n  Account: owner\n  Plan:    Free\n  Used:    " + test.usedText + " / 2000 min  ( " + test.percent + "% )\n"
+			wantQuota := "\nActions quota:\n  Account: owner\n  Used:    " + test.usedText + " / 2000 min  ( " + test.percent + "% )\n  Plan:    Free\n"
 			if !strings.HasSuffix(output.String(), wantQuota) || strings.Contains(output.String(), "Remaining") || strings.Contains(output.String(), "Usage:") {
 				t.Fatalf("wrong quota formatting: %s", output)
 			}
@@ -263,7 +265,7 @@ func TestStatusPrivateReusesStoredCredential(t *testing.T) {
 	if strings.Contains(output.String(), "/login/device") || strings.Contains(output.String(), "Code:") || strings.Contains(output.String(), "Code copied") {
 		t.Fatal("cached status displayed device authorization")
 	}
-	want := "Repository: owner/repo\nVisibility: Private (metered)\n\nActions quota:\n  Account: owner\n  Plan:    Pro\n  Used:    2000.00 / 3000 min  ( 66.67% )\n"
+	want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Used:    2000.00 / 3000 min  ( 66.67% )\n  Plan:    Pro\n"
 	if output.String() != want {
 		t.Fatalf("wrong cached private output: %s", output)
 	}
@@ -360,7 +362,7 @@ func TestStatusPlanFormatting(t *testing.T) {
 			if err := s.status(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			want := "Repository: owner/repo\nVisibility: Private (metered)\n\nActions quota:\n  Account: owner\n  Plan:    " + test.display + "\n  Used:    742.33 / " + test.quota + " min  ( " + test.percent + "% )\n"
+			want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Used:    742.33 / " + test.quota + " min  ( " + test.percent + "% )\n  Plan:    " + test.display + "\n"
 			if output.String() != want {
 				t.Fatalf("wrong status formatting: %s", output)
 			}
