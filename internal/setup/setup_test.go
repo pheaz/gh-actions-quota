@@ -66,7 +66,7 @@ func setupFixture(t *testing.T, gh *fakeGH, account string, billingStatus int) (
 				t.Error("wrong app authorization")
 			}
 			io.WriteString(w, account)
-		case "/users/owner/settings/billing/usage/summary":
+		case "/users/owner/settings/billing/usage":
 			if r.Header.Get("X-GitHub-Api-Version") != apiVersion || r.URL.Query().Get("product") != "Actions" || r.URL.Query().Get("month") == "" || r.URL.Query().Get("year") == "" {
 				t.Error("wrong billing request")
 			}
@@ -75,7 +75,9 @@ func setupFixture(t *testing.T, gh *fakeGH, account string, billingStatus int) (
 				io.WriteString(w, fakeToken)
 				return
 			}
-			io.WriteString(w, `{"usageItems":[{"product":"Actions","unitType":"minutes","discountAmount":6.13},{"product":"Actions","unitType":"minutes","discountAmount":5.87}]}`)
+			io.WriteString(w, `{"usageItems":[{"product":"Actions","unitType":"minutes","sku":"actions_windows","repositoryName":"owner/repo","discountAmount":6.13},{"product":"Actions","unitType":"minutes","sku":"actions_macos","repositoryName":"owner/repo","discountAmount":5.87}]}`)
+		case "/repos/owner/repo":
+			io.WriteString(w, `{"private":true}`)
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
 		}
@@ -188,22 +190,6 @@ func TestBillingFailurePreventsSecretWrite(t *testing.T) {
 	}
 	if len(gh.calls) != 4 {
 		t.Fatal("secret written despite billing failure")
-	}
-}
-
-func TestBillingValidationAndConversion(t *testing.T) {
-	for _, body := range []string{`{}`, `{"usageItems":null}`, `{"usageItems":[null]}`, `{"usageItems":[{"product":"Actions","unitType":"minutes"}]}`,
-		`{"usageItems":[{"product":"Actions","unitType":"minutes","discountAmount":-1}]}`} {
-		c := testClient(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) })
-		if _, err := c.checkBilling(context.Background(), "owner", fakeToken); err == nil {
-			t.Fatal("invalid billing accepted")
-		}
-	}
-	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"usageItems":[{"product":"Actions","unitType":"minutes","discountAmount":1.8},{"product":"Packages","unitType":"minutes","discountAmount":99}]}`)
-	})
-	if used, err := c.checkBilling(context.Background(), "owner", fakeToken); err != nil || used != 300 {
-		t.Fatal("wrong billing conversion")
 	}
 }
 

@@ -14,13 +14,24 @@ var INCLUDED_MINUTES_BY_PLAN = Object.freeze({
 });
 
 // src/billing.ts
+var INCLUDED_SKUS = /* @__PURE__ */ new Set([
+  "actions_linux_slim",
+  "actions_linux",
+  "actions_linux_arm",
+  "actions_windows",
+  "actions_windows_arm",
+  "actions_macos"
+]);
+function normalizeSku(sku) {
+  return typeof sku === "string" ? sku.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+}
 function object(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("GitHub API response must be an object");
   }
   return value;
 }
-async function requestJson(url, token, fetchImpl = fetch) {
+async function request(url, token, fetchImpl) {
   let response;
   try {
     response = await fetchImpl(url, {
@@ -36,6 +47,10 @@ async function requestJson(url, token, fetchImpl = fetch) {
   } catch {
     throw new Error("GitHub API request failed");
   }
+  return response;
+}
+async function requestJson(url, token, fetchImpl = fetch) {
+  const response = await request(url, token, fetchImpl);
   if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status}`);
   try {
     return object(await response.json());
@@ -43,25 +58,42 @@ async function requestJson(url, token, fetchImpl = fetch) {
     throw new Error("GitHub API returned an invalid response");
   }
 }
-function parseUsedMinutes(payload) {
-  const summary = object(payload);
-  if (!Array.isArray(summary.usageItems)) {
+async function isPublicRepository(repository, token, fetchImpl) {
+  const [owner, name] = repository.split("/", 2);
+  if (!owner || !name) return false;
+  const response = await request(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    token,
+    fetchImpl
+  );
+  if (response.status === 404) return false;
+  if (!response.ok) throw new Error("GitHub repository lookup failed");
+  try {
+    return object(await response.json()).private === false;
+  } catch {
+    throw new Error("GitHub API returned an invalid response");
+  }
+}
+async function parseUsedMinutes(payload, token, fetchImpl = fetch) {
+  const report = object(payload);
+  if (!Array.isArray(report.usageItems)) {
     throw new Error("GitHub billing response must contain usageItems");
   }
-  let discountAmount = 0;
-  for (const candidate of summary.usageItems) {
+  const publicRepositories = /* @__PURE__ */ new Map();
+  let discountedUSD = 0;
+  for (const candidate of report.usageItems) {
     const item = object(candidate);
-    if (typeof item.product !== "string" || typeof item.unitType !== "string") {
-      throw new Error("GitHub billing usage item is invalid");
+    if (item.product !== "Actions" || item.unitType !== "minutes" || !INCLUDED_SKUS.has(normalizeSku(item.sku)) || typeof item.repositoryName !== "string") continue;
+    if (!publicRepositories.has(item.repositoryName)) {
+      publicRepositories.set(item.repositoryName, await isPublicRepository(item.repositoryName, token, fetchImpl));
     }
-    if (item.product === "Actions" && item.unitType === "minutes") {
-      if (typeof item.discountAmount !== "number" || !Number.isFinite(item.discountAmount) || item.discountAmount < 0) {
-        throw new Error("GitHub billing discountAmount must be non-negative and finite");
-      }
-      discountAmount += item.discountAmount;
+    if (publicRepositories.get(item.repositoryName)) continue;
+    if (typeof item.discountAmount !== "number" || !Number.isFinite(item.discountAmount) || item.discountAmount < 0) {
+      throw new Error("Invalid discountAmount");
     }
+    discountedUSD += item.discountAmount;
   }
-  const minutes = discountAmount / LINUX_MINUTE_PRICE_USD;
+  const minutes = discountedUSD / LINUX_MINUTE_PRICE_USD;
   if (!Number.isFinite(minutes)) throw new Error("GitHub billing usage is out of range");
   return minutes;
 }
@@ -100,11 +132,11 @@ async function fetchUsedMinutes(owner, token, { ownerType, now = /* @__PURE__ */
     product: "Actions"
   });
   const payload = await requestJson(
-    `https://api.github.com/users/${encodeURIComponent(owner)}/settings/billing/usage/summary?${query}`,
+    `https://api.github.com/users/${encodeURIComponent(owner)}/settings/billing/usage?${query}`,
     token,
     fetchImpl
   );
-  return parseUsedMinutes(payload);
+  return parseUsedMinutes(payload, token, fetchImpl);
 }
 
 // src/usage.ts

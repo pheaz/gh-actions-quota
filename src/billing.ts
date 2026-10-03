@@ -3,6 +3,19 @@ import { API_VERSION, INCLUDED_MINUTES_BY_PLAN, LINUX_MINUTE_PRICE_USD } from ".
 export type Fetch = typeof fetch;
 export type OwnerType = "user" | "organization";
 
+const INCLUDED_SKUS = new Set([
+  "actions_linux_slim",
+  "actions_linux",
+  "actions_linux_arm",
+  "actions_windows",
+  "actions_windows_arm",
+  "actions_macos",
+]);
+
+function normalizeSku(sku: unknown): string {
+  return typeof sku === "string" ? sku.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+}
+
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("GitHub API response must be an object");
@@ -10,7 +23,7 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export async function requestJson(url: string, token: string, fetchImpl: Fetch = fetch): Promise<Record<string, unknown>> {
+async function request(url: string, token: string, fetchImpl: Fetch): Promise<Response> {
   // Never include response bodies, request headers or transport errors in diagnostics.
   let response: Response;
   try {
@@ -27,6 +40,11 @@ export async function requestJson(url: string, token: string, fetchImpl: Fetch =
   } catch {
     throw new Error("GitHub API request failed");
   }
+  return response;
+}
+
+export async function requestJson(url: string, token: string, fetchImpl: Fetch = fetch): Promise<Record<string, unknown>> {
+  const response = await request(url, token, fetchImpl);
   if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status}`);
   try {
     return object(await response.json());
@@ -35,25 +53,47 @@ export async function requestJson(url: string, token: string, fetchImpl: Fetch =
   }
 }
 
-export function parseUsedMinutes(payload: unknown): number {
-  const summary = object(payload);
-  if (!Array.isArray(summary.usageItems)) {
+async function isPublicRepository(repository: string, token: string, fetchImpl: Fetch): Promise<boolean> {
+  const [owner, name] = repository.split("/", 2);
+  if (!owner || !name) return false;
+  const response = await request(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    token, fetchImpl,
+  );
+  if (response.status === 404) return false;
+  if (!response.ok) throw new Error("GitHub repository lookup failed");
+  try {
+    return object(await response.json()).private === false;
+  } catch {
+    throw new Error("GitHub API returned an invalid response");
+  }
+}
+
+export async function parseUsedMinutes(payload: unknown, token: string, fetchImpl: Fetch = fetch): Promise<number> {
+  const report = object(payload);
+  if (!Array.isArray(report.usageItems)) {
     throw new Error("GitHub billing response must contain usageItems");
   }
-  let discountAmount = 0;
-  for (const candidate of summary.usageItems) {
+  const publicRepositories = new Map<string, boolean>();
+  let discountedUSD = 0;
+  for (const candidate of report.usageItems) {
     const item = object(candidate);
-    if (typeof item.product !== "string" || typeof item.unitType !== "string") {
-      throw new Error("GitHub billing usage item is invalid");
+    if (
+      item.product !== "Actions" ||
+      item.unitType !== "minutes" ||
+      !INCLUDED_SKUS.has(normalizeSku(item.sku)) ||
+      typeof item.repositoryName !== "string"
+    ) continue;
+    if (!publicRepositories.has(item.repositoryName)) {
+      publicRepositories.set(item.repositoryName, await isPublicRepository(item.repositoryName, token, fetchImpl));
     }
-    if (item.product === "Actions" && item.unitType === "minutes") {
-      if (typeof item.discountAmount !== "number" || !Number.isFinite(item.discountAmount) || item.discountAmount < 0) {
-        throw new Error("GitHub billing discountAmount must be non-negative and finite");
-      }
-      discountAmount += item.discountAmount;
+    if (publicRepositories.get(item.repositoryName)) continue;
+    if (typeof item.discountAmount !== "number" || !Number.isFinite(item.discountAmount) || item.discountAmount < 0) {
+      throw new Error("Invalid discountAmount");
     }
+    discountedUSD += item.discountAmount;
   }
-  const minutes = discountAmount / LINUX_MINUTE_PRICE_USD;
+  const minutes = discountedUSD / LINUX_MINUTE_PRICE_USD;
   if (!Number.isFinite(minutes)) throw new Error("GitHub billing usage is out of range");
   return minutes;
 }
@@ -101,8 +141,8 @@ export async function fetchUsedMinutes(
     product: "Actions",
   });
   const payload = await requestJson(
-    `https://api.github.com/users/${encodeURIComponent(owner)}/settings/billing/usage/summary?${query}`,
+    `https://api.github.com/users/${encodeURIComponent(owner)}/settings/billing/usage?${query}`,
     token, fetchImpl,
   );
-  return parseUsedMinutes(payload);
+  return parseUsedMinutes(payload, token, fetchImpl);
 }

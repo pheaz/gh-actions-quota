@@ -88,10 +88,19 @@ if you want them to be gated.
 The project never saves the token to a local file, passes it in command arguments
 or prints it. It remains in memory and is piped to `gh secret set` through stdin.
 There is no server, central token store or telemetry. `gh` is only needed for
-setup; workflow users need no additional runtime or installation step.
+setup and status; workflow users need no additional runtime or installation step.
 
 Organization-owned repositories are **not supported for metered billing in v1**.
 Public repositories using standard GitHub-hosted runners need no setup or token.
+
+## Status
+
+Run `gh actions-quota status` from a repository checkout to show its visibility
+and Actions quota. Public repositories report `unmetered` without authorization
+or billing requests. Private repositories use the same GitHub App device flow
+as setup and show the owner's plan, used/quota minutes, remaining minutes and
+usage percentage. Status is read-only: it changes no repository files or secrets
+and keeps the token only in memory.
 
 ## Workflow
 
@@ -161,12 +170,14 @@ and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage
 
 ## Quota calculation
 
-The action reads the current **UTC calendar month's** Actions billing summary
-for the repository owner's account. It sums `discountAmount` only for
-`product=Actions` and `unitType=minutes`, then divides by **`$0.006/min`** to
-calculate Linux-equivalent included minutes. Other products and storage usage
-are excluded. Usage is account-wide, including other repositories owned by the
-same account. Billing data may arrive with a delay, so this is a gate based on
+The action and CLI read the current **UTC calendar month's** Actions usage report
+for the repository owner's account. They sum `discountAmount` only for
+`product=Actions`, `unitType=minutes` and standard GitHub-hosted runner SKUs,
+then divide by **`$0.006/min`** to calculate Linux-equivalent included minutes.
+Public repositories, larger runners, self-hosted runners, storage and other
+products are excluded. Repository visibility is checked once per repository;
+a 404 is conservatively counted. Usage is account-wide across private repositories.
+Billing data may arrive with a delay, so this is a gate based on
 reported usage rather than a real-time spending limit.
 
 | Plan | Included monthly minutes |
