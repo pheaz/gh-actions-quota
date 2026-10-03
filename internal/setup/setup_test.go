@@ -150,7 +150,6 @@ func TestPublicRepositorySkipsAuthorizationAndSecretWrite(t *testing.T) {
 	}
 }
 
-
 func TestOwnerMismatchAndMissingPlanDoNotWriteSecret(t *testing.T) {
 	for _, account := range []string{`{"login":"other","type":"User","plan":{"name":"pro"}}`, `{"login":"owner","type":"User"}`,
 		`{"login":"owner","type":"Organization","plan":{"name":"team"}}`, `{"login":"owner","type":"User","plan":{"name":"unknown"}}`} {
