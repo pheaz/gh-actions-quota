@@ -116,41 +116,82 @@ from a public repository, including one owned by an organization.
 
 ## Status
 
-Run `gh actions-quota status` from a repository checkout. For a public repository,
-status determines the personal account currently signed in with `gh` on
-github.com (via `gh api user`) and shows that account's plan and private Actions
-usage. It uses this account even when the public repository belongs to another
-user or an organization:
+Run `gh actions-quota status` from a repository checkout or from any other
+directory. When no repository can be resolved, status still shows the current
+personal GitHub account's private Actions quota:
+
+```text
+Repository: not found
+
+Actions quota:
+  Account: philippwallrafen
+  Used:    742.33 / 2000 min  ( 37.12% )
+  Plan:    Free
+```
+
+When a repository is available, status also reports whether that repository is
+metered and inspects its gh-actions-quota setup.
+
+For a **public repository**, status uses the personal account currently signed in
+with `gh` on github.com. Public repositories are unmetered on standard
+GitHub-hosted runners. Setup artifacts are shown only when they are present:
 
 ```text
 Repository: some-org/example
 Visibility: Public (unmetered)
 
+Setup:
+  Workflow: present
+  Secret:   present
+
 Actions quota:
   Account: philippwallrafen
-  Plan:    Free
   Used:    742.33 / 2000 min  ( 37.12% )
+  Plan:    Free
 ```
 
-For a private repository, status shows the repository owner's personal account
-quota, regardless of the current `gh` account. Organization-owned private
-repositories remain unsupported:
+If neither `.github/workflows/gh-actions-quota.yml` nor
+`ACTIONS_QUOTA_TOKEN` is present, the `Setup` block is omitted entirely for
+public repositories. A present workflow or secret is shown individually; missing
+public setup artifacts are never printed.
+
+For a **private repository**, status uses the repository owner's personal account
+quota. Organization-owned private repositories remain unsupported. Both setup
+states are always shown:
 
 ```text
 Repository: philippwallrafen/example
 Visibility: Private (metered)
 
+Setup:
+  Workflow: present
+  Secret:   present
+
 Actions quota:
   Account: philippwallrafen
-  Plan:    Free
   Used:    742.33 / 2000 min  ( 37.12% )
+  Plan:    Free
 ```
 
-Visibility describes the repository: public repositories do not consume private
-Actions quota on standard GitHub-hosted runners; private repositories can.
-The quota block always describes the displayed personal account's private
-Actions usage across its repositories, using the current `gh` account for public
-repositories and the repository owner for private repositories.
+A private repository with incomplete setup reports the missing state explicitly:
+
+```text
+Setup:
+  Workflow: missing
+  Secret:   missing
+```
+
+The workflow check only inspects the local
+`.github/workflows/gh-actions-quota.yml` path. The secret check lists repository
+Actions secret metadata and tests only for the name `ACTIONS_QUOTA_TOKEN`; secret
+values are never read or printed. If secret metadata cannot be inspected for a
+public repository, no secret status is shown. For a private repository, status
+returns an error rather than incorrectly reporting the secret as missing.
+
+Visibility describes the repository. The quota block always describes the
+displayed personal account's private Actions usage across its repositories:
+the current `gh` account for public repositories or when no repository is found,
+and the repository owner for private repositories.
 
 Both public and private status reuse the relevant account's cached GitHub App
 authorization. The device flow is shown only when no usable credential exists,
@@ -158,8 +199,7 @@ when it was revoked or belongs to the wrong account, or when secure storage was
 unavailable on the previous run. Fresh device codes use the same clipboard
 behavior as setup and valid credentials are stored for reuse across repositories.
 
-Status is read-only with respect to the repository: it changes no repository
-files or secrets and never logs the token.
+Status does not modify repository files or secrets and never logs the token.
 A successful fresh authorization may create or replace the account-scoped entry
 in the operating system's secure credential store.
 
