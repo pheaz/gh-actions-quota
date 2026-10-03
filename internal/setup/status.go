@@ -12,7 +12,7 @@ import (
 )
 
 // Status reports account quota usage without changing repository files or secrets.
-// Fresh authorization is persisted in the OS credential store.
+// It requires a stored gh-actions-quota authorization and never starts device flow.
 func Status(ctx context.Context, input io.Reader, output io.Writer) error {
 	return newSetup(input, output).status(ctx)
 }
@@ -65,7 +65,7 @@ func (s *setup) status(ctx context.Context) error {
 		}
 	}
 
-	token, plan, quota, err := s.authorizationForOwner(ctx, account)
+	token, plan, quota, err := s.storedAuthorizationForOwner(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func (s *setup) currentPersonalAccount(ctx context.Context) (string, error) {
 		Type  string `json:"type"`
 	}
 	if json.Unmarshal(data, &account) != nil || !accountPattern.MatchString(account.Login) || !strings.EqualFold(account.Type, "User") {
-		return "", errors.New("status requires a supported personal GitHub account signed in with gh on github.com")
+		return "", errors.New("a supported personal GitHub account must be signed in with gh on github.com")
 	}
 	return account.Login, nil
 }
