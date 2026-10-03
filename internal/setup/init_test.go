@@ -164,11 +164,11 @@ func TestApplyWorkflowChoicesAddsAndRemoves(t *testing.T) {
 
 func TestChecklistKeys(t *testing.T) {
 	for input, expected := range map[string]string{
-		" ":       "toggle",
-		"\r":      "apply",
-		"\x03":    "cancel",
-		"\x1b[A":  "up",
-		"\x1b[B":  "down",
+		" ":      "toggle",
+		"\r":     "apply",
+		"\x03":   "cancel",
+		"\x1b[A": "up",
+		"\x1b[B": "down",
 	} {
 		got, err := readChecklistKey(strings.NewReader(input))
 		if err != nil {
