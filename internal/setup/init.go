@@ -12,7 +12,7 @@ import (
 	"golang.org/x/term"
 )
 
-const quotaCallerBlock = `  quota:
+const quotaCallerBlock = `  gh-actions-quota:
     uses: ./.github/workflows/gh-actions-quota.yml
     secrets: inherit
 
@@ -231,6 +231,11 @@ func hasQuotaCaller(content string) bool {
 
 func setQuotaCaller(content string, selected bool) (string, error) {
 	lines := strings.Split(content, "\n")
+	if selected {
+		if _, err := parseWorkflow(content); err != nil {
+			return "", err
+		}
+	}
 	jobsIndex, callers, blocks := analyzeJobs(lines)
 	if !selected && len(callers) == 0 {
 		return content, nil
@@ -250,12 +255,12 @@ func setQuotaCaller(content string, selected bool) (string, error) {
 	}
 
 	if len(callers) == 1 {
-		return content, nil
+		return migrateQuotaCaller(content)
 	}
 
 	for _, block := range blocks {
-		if block.id == "quota" {
-			return "", errors.New("workflow already defines jobs.quota with different content")
+		if block.id == quotaJobID {
+			return "", errors.New("workflow already defines jobs.gh-actions-quota with different content")
 		}
 	}
 
@@ -299,6 +304,7 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 
 	var blocks []jobBlock
 	var callers []jobBlock
+	document, _ := parseWorkflow(strings.Join(lines, "\n"))
 	for index, start := range starts {
 		end := sectionEnd
 		if index+1 < len(starts) {
@@ -315,17 +321,7 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 		id = strings.Trim(id, "'\"")
 		block := jobBlock{id: id, start: start, end: end}
 		blocks = append(blocks, block)
-		hasUses := false
-		hasInheritedSecrets := false
-		for i := start + 1; i < end; i++ {
-			switch strings.TrimSpace(lines[i]) {
-			case "uses: ./.github/workflows/gh-actions-quota.yml":
-				hasUses = true
-			case "secrets: inherit":
-				hasInheritedSecrets = true
-			}
-		}
-		if hasUses && hasInheritedSecrets {
+		if document != nil && id == document.caller {
 			callers = append(callers, block)
 		}
 	}

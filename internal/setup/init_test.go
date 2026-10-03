@@ -51,7 +51,7 @@ func TestSetQuotaCallerAddsInheritAndRemovesAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"  quota:\n",
+		"  gh-actions-quota:\n",
 		"    uses: ./.github/workflows/gh-actions-quota.yml\n",
 		"    secrets: inherit\n",
 	} {
@@ -87,9 +87,9 @@ func TestSetQuotaCallerLeavesUnselectedFileWithoutJobsUntouched(t *testing.T) {
 }
 
 func TestSetQuotaCallerRefusesConflictingQuotaJob(t *testing.T) {
-	content := "jobs:\n  quota:\n    runs-on: ubuntu-latest\n"
+	content := "jobs:\n  gh-actions-quota:\n    runs-on: ubuntu-latest\n"
 	_, err := setQuotaCaller(content, true)
-	if err == nil || !strings.Contains(err.Error(), "jobs.quota") {
+	if err == nil || !strings.Contains(err.Error(), "jobs.gh-actions-quota") {
 		t.Fatal("conflicting quota job was not rejected")
 	}
 }

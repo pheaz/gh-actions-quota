@@ -1,4 +1,4 @@
-name: GitHub Actions Quota
+name: gh-actions-quota
 description: Gate expensive jobs based on the repository owner's included GitHub Actions quota.
 author: Philipp Wallrafen
 

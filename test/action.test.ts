@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAction } from "../src/action.js";
 
+test("action metadata uses the canonical gh-actions-quota name", () => {
+  const metadata = readFileSync("action.yml", "utf8");
+  assert.match(metadata, /^name: gh-actions-quota\r?\n/);
+});
+
 // Deliberately fake credentials; all requests are mocked.
 const fakeToken = "test-only-token";
 async function action(options: { env?: NodeJS.ProcessEnv; used?: number; plan?: string; status?: number; ownerType?: string; malformed?: boolean } = {}) {

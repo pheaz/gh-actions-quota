@@ -69,8 +69,7 @@ func parseWorkflow(text string) (*workflowDocument, error) {
 	for i := 0; i < len(jobs.Content); i += 2 {
 		job := jobs.Content[i+1]
 		_, uses := mappingValue(job, "uses")
-		_, secrets := mappingValue(job, "secrets")
-		if uses != nil && uses.Value == "./.github/workflows/gh-actions-quota.yml" && secrets != nil && secrets.Value == "inherit" {
+		if uses != nil && uses.Value == "./"+workflowPath {
 			if w.caller != "" {
 				return nil, errors.New("workflow defines multiple gh-actions-quota callers")
 			}
@@ -586,6 +585,10 @@ func setJobGates(text string, choices []jobChoice) (string, error) {
 		}
 		edits = append(edits, changes...)
 	}
+	return w.applyEdits(edits)
+}
+
+func (w *workflowDocument) applyEdits(edits []lineEdit) (string, error) {
 	// Stable order preserves needs before if when both are inserted at one point.
 	sort.SliceStable(edits, func(i, j int) bool {
 		if edits[i].start == edits[j].start {
@@ -605,7 +608,7 @@ func setJobGates(text string, choices []jobChoice) (string, error) {
 	}
 	result = append(result, w.lines[offset:]...)
 	updated := strings.Join(result, "\n")
-	if strings.Contains(text, "\r\n") {
+	if strings.Contains(w.text, "\r\n") {
 		updated = strings.ReplaceAll(strings.ReplaceAll(updated, "\r\n", "\n"), "\n", "\r\n")
 	}
 	if _, err := parseWorkflow(updated); err != nil {

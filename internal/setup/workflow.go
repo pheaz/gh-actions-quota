@@ -6,13 +6,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const workflowPath = ".github/workflows/gh-actions-quota.yml"
 
 const actionMajor = "v1"
 
-const reusableWorkflow = `name: GitHub Actions quota
+const quotaJobID = "gh-actions-quota"
+
+const reusableWorkflow = `name: gh-actions-quota
 
 on:
   workflow_call:
@@ -28,33 +31,43 @@ on:
     outputs:
       allowed:
         description: Whether gated jobs may run.
-        value: ${{ jobs.quota.outputs.allowed }}
+        value: ${{ jobs.gh-actions-quota.outputs.allowed }}
       usage_available:
         description: Whether billing usage could be determined.
-        value: ${{ jobs.quota.outputs.usage_available }}
+        value: ${{ jobs.gh-actions-quota.outputs.usage_available }}
       usage_percent:
         description: Percent of the included Actions quota consumed.
-        value: ${{ jobs.quota.outputs.usage_percent }}
+        value: ${{ jobs.gh-actions-quota.outputs.usage_percent }}
 
 permissions:
   contents: read
 
 jobs:
-  quota:
-    name: CI quota control
+  gh-actions-quota:
+    name: gh-actions-quota
     runs-on: ubuntu-slim
     outputs:
-      allowed: ${{ steps.quota.outputs.allowed }}
-      usage_available: ${{ steps.quota.outputs['usage-available'] }}
-      usage_percent: ${{ steps.quota.outputs['usage-percent'] }}
+      allowed: ${{ steps.gh-actions-quota.outputs.allowed }}
+      usage_available: ${{ steps.gh-actions-quota.outputs['usage-available'] }}
+      usage_percent: ${{ steps.gh-actions-quota.outputs['usage-percent'] }}
 
     steps:
       - uses: philippwallrafen/gh-actions-quota@` + actionMajor + `
-        id: quota
+        id: gh-actions-quota
         with:
           token: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
           threshold: ${{ inputs.threshold }}
 `
+
+// Match the previous generated template exactly; customized files remain protected.
+var legacyReusableWorkflow = strings.NewReplacer(
+	"name: gh-actions-quota\n\non:", "name: GitHub Actions quota\n\non:",
+	"jobs.gh-actions-quota.outputs", "jobs.quota.outputs",
+	"  gh-actions-quota:\n", "  quota:\n",
+	"    name: gh-actions-quota", "    name: CI quota control",
+	"steps.gh-actions-quota.outputs", "steps.quota.outputs",
+	"id: gh-actions-quota", "id: quota",
+).Replace(reusableWorkflow)
 
 func ensureReusableWorkflow(root string) (bool, error) {
 	path := filepath.Join(root, filepath.FromSlash(workflowPath))
@@ -62,6 +75,16 @@ func ensureReusableWorkflow(root string) (bool, error) {
 	if err == nil {
 		if string(existing) == reusableWorkflow {
 			return false, nil
+		}
+		if string(existing) == legacyReusableWorkflow {
+			info, err := os.Stat(path)
+			if err != nil {
+				return false, fmt.Errorf("could not inspect %s", workflowPath)
+			}
+			if err := os.WriteFile(path, []byte(reusableWorkflow), info.Mode().Perm()); err != nil {
+				return false, fmt.Errorf("could not migrate %s", workflowPath)
+			}
+			return true, nil
 		}
 		return false, fmt.Errorf("%s already exists and differs from the generated template; reconcile or remove it before running setup again", workflowPath)
 	}

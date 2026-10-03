@@ -1,0 +1,42 @@
+name: GitHub Actions quota
+
+on:
+  workflow_call:
+    inputs:
+      threshold:
+        description: Stop allowing gated jobs once usage reaches this percentage.
+        type: number
+        required: false
+        default: 50
+    secrets:
+      ACTIONS_QUOTA_TOKEN:
+        required: true
+    outputs:
+      allowed:
+        description: Whether gated jobs may run.
+        value: ${{ jobs.quota.outputs.allowed }}
+      usage_available:
+        description: Whether billing usage could be determined.
+        value: ${{ jobs.quota.outputs.usage_available }}
+      usage_percent:
+        description: Percent of the included Actions quota consumed.
+        value: ${{ jobs.quota.outputs.usage_percent }}
+
+permissions:
+  contents: read
+
+jobs:
+  quota:
+    name: CI quota control
+    runs-on: ubuntu-slim
+    outputs:
+      allowed: ${{ steps.quota.outputs.allowed }}
+      usage_available: ${{ steps.quota.outputs['usage-available'] }}
+      usage_percent: ${{ steps.quota.outputs['usage-percent'] }}
+
+    steps:
+      - uses: philippwallrafen/gh-actions-quota@v1
+        id: quota
+        with:
+          token: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
+          threshold: ${{ inputs.threshold }}

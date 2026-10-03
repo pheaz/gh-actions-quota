@@ -29,7 +29,7 @@ func TestJobGatesPreserveFieldsAndRemoveAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"needs: [lint, quota]", "(github.ref == 'refs/heads/main') && (" + quotaExpression("quota", "50") + ")", "# Existing build dependency.", "# Keep dependency comment.", "# Keep condition comment.", "      - run: echo hello # Keep step comment.", "# Keep this comment."} {
+	for _, fragment := range []string{"needs: [lint, gh-actions-quota]", "(github.ref == 'refs/heads/main') && (" + quotaExpression("gh-actions-quota", "50") + ")", "# Existing build dependency.", "# Keep dependency comment.", "# Keep condition comment.", "      - run: echo hello # Keep step comment.", "# Keep this comment."} {
 		if !strings.Contains(added, fragment) {
 			t.Fatalf("missing %q:\n%s", fragment, added)
 		}
@@ -47,7 +47,7 @@ func TestJobGatesPreserveFieldsAndRemoveAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(removed, "usage_percent") || strings.Contains(removed, "# Quota threshold") || strings.Contains(removed, "[lint, quota]") {
+	if strings.Contains(removed, "usage_percent") || strings.Contains(removed, "# Quota threshold") || strings.Contains(removed, "[lint, gh-actions-quota]") {
 		t.Fatalf("gate not removed:\n%s", removed)
 	}
 	for _, fragment := range []string{"needs: [lint]", "${{ github.ref == 'refs/heads/main' }}", "# Keep condition comment.", "# Keep dependency comment."} {
@@ -76,7 +76,7 @@ func TestJobGateInsertsFieldsInDifferentOrders(t *testing.T) {
 			_, job := mappingValue(doc.jobs, "build")
 			_, needs := mappingValue(job, "needs")
 			ids, err := dependencyIDs(needs)
-			if err != nil || ids[len(ids)-1] != "quota" {
+			if err != nil || ids[len(ids)-1] != "gh-actions-quota" {
 				t.Fatalf("bad needs: %v %v", ids, err)
 			}
 			if strings.Contains(body, "lint comment") && !strings.Contains(added, "lint comment") {
@@ -133,7 +133,7 @@ func TestJobGatesPreserveThresholdsAndLineEndings(t *testing.T) {
 
 func TestLegacyJobGatesUseCallerThreshold(t *testing.T) {
 	for _, threshold := range []string{"", "75", "${{ inputs.threshold }}"} {
-		caller := strings.Replace(quotaCallerBlock, "  quota:", "  billing:", 1)
+		caller := strings.Replace(quotaCallerBlock, "  gh-actions-quota:", "  billing:", 1)
 		if threshold != "" {
 			caller += "    with:\n      threshold: " + threshold + "\n"
 		}
@@ -168,7 +168,7 @@ func TestLegacyJobGatesUseCallerThreshold(t *testing.T) {
 
 func TestUnsafeJobConditionsAreDisabled(t *testing.T) {
 	for _, body := range []string{
-		"    if: needs.quota.outputs.allowed == 'true' || failure()\n",
+		"    if: needs.gh-actions-quota.outputs.allowed == 'true' || failure()\n",
 		"    needs: ${{ inputs.dependencies }}\n",
 		"    if: ${{ github.ref }} == 'main'\n",
 		"    <<: *defaults\n",
@@ -297,8 +297,8 @@ func TestJobGatePreservesCommentsExactlyOnce(t *testing.T) {
 }
 
 func TestRemovingGateKeepsDependencyComments(t *testing.T) {
-	for _, needs := range []string{"    needs: quota # dependency note\n", "    needs:\n      # quota dependency\n      - quota # quota note\n", "    needs:\n      - quota # quota note\n      - lint # lint note\n"} {
-		text := jobWorkflow("  build:\n" + needs + "    if: " + quotaExpression("quota", "50") + "\n    runs-on: ubuntu-latest\n")
+	for _, needs := range []string{"    needs: gh-actions-quota # dependency note\n", "    needs:\n      # quota dependency\n      - gh-actions-quota # quota note\n", "    needs:\n      - gh-actions-quota # quota note\n      - lint # lint note\n"} {
+		text := jobWorkflow("  build:\n" + needs + "    if: " + quotaExpression("gh-actions-quota", "50") + "\n    runs-on: ubuntu-latest\n")
 		choices := choicesFor(t, text)
 		choices[0].selected = false
 		removed, err := setJobGates(text, choices)
@@ -335,12 +335,12 @@ func TestGeneratedThresholdWorkflow(t *testing.T) {
 }
 
 func TestJobGateRepairsMissingQuotaDependency(t *testing.T) {
-	text := jobWorkflow("  build:\n    # Quota threshold (%): change 75 below to adjust this job's limit.\n    if: " + quotaExpression("quota", "75") + "\n    runs-on: ubuntu-latest\n")
+	text := jobWorkflow("  build:\n    # Quota threshold (%): change 75 below to adjust this job's limit.\n    if: " + quotaExpression("gh-actions-quota", "75") + "\n    runs-on: ubuntu-latest\n")
 	repaired, err := setJobGates(text, choicesFor(t, text))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(repaired, "needs: quota") || !strings.Contains(repaired, " < 75") {
+	if !strings.Contains(repaired, "needs: gh-actions-quota") || !strings.Contains(repaired, " < 75") {
 		t.Fatal("missing dependency not repaired")
 	}
 }

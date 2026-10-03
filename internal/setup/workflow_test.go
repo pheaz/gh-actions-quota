@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,15 @@ func TestEnsureReusableWorkflowCreatesAndIsIdempotent(t *testing.T) {
 		t.Fatal("workflow content differs from template")
 	}
 	for _, fragment := range []string{
+		"name: gh-actions-quota\n",
+		"  gh-actions-quota:\n    name: gh-actions-quota\n",
+		"id: gh-actions-quota\n",
+		"jobs.gh-actions-quota.outputs.allowed",
+		"jobs.gh-actions-quota.outputs.usage_available",
+		"jobs.gh-actions-quota.outputs.usage_percent",
+		"steps.gh-actions-quota.outputs.allowed",
+		"steps.gh-actions-quota.outputs['usage-available']",
+		"steps.gh-actions-quota.outputs['usage-percent']",
 		"workflow_call:",
 		"ACTIONS_QUOTA_TOKEN:",
 		"philippwallrafen/gh-actions-quota@" + actionMajor,
@@ -66,5 +76,60 @@ func TestEnsureReusableWorkflowRefusesModifiedFile(t *testing.T) {
 	data, readErr := os.ReadFile(path)
 	if readErr != nil || string(data) != custom {
 		t.Fatal("modified workflow was overwritten")
+	}
+}
+
+func TestEnsureReusableWorkflowMigratesLegacyTemplate(t *testing.T) {
+	legacy, err := os.ReadFile("testdata/legacy-gh-actions-quota.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(legacy) != legacyReusableWorkflow {
+		t.Fatal("legacy template recognition differs from the previous generated file")
+	}
+	for _, custom := range []bool{false, true} {
+		t.Run(fmt.Sprint(custom), func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, filepath.FromSlash(workflowPath))
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			content := string(legacy)
+			if custom {
+				content = strings.Replace(content, "default: 50", "default: 75", 1)
+			}
+			if err := os.WriteFile(path, []byte(content), 0640); err != nil {
+				t.Fatal(err)
+			}
+			changed, err := ensureReusableWorkflow(root)
+			if custom {
+				if err == nil || changed {
+					t.Fatal("customized legacy template was overwritten")
+				}
+			} else if err != nil || !changed {
+				t.Fatalf("migration failed: %v", err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := reusableWorkflow
+			if custom {
+				want = content
+			}
+			if string(data) != want {
+				t.Fatal("unexpected workflow content")
+			}
+			info, err := os.Stat(path)
+			if err != nil || info.Mode().Perm() != 0640 {
+				t.Fatal("file permissions changed")
+			}
+			if !custom {
+				changed, err = ensureReusableWorkflow(root)
+				if err != nil || changed {
+					t.Fatal("migration is not idempotent")
+				}
+			}
+		})
 	}
 }

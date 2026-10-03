@@ -24,8 +24,10 @@ token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using your existing loc
 
 Setup also creates **`.github/workflows/gh-actions-quota.yml`**, a reusable
 workflow that wraps the quota action with a default threshold of 50 percent.
-Re-running setup leaves an identical generated file unchanged; if that path
-contains a modified workflow, setup refuses to overwrite it.
+The Action name, reusable workflow name, job ID/name and step ID are all
+`gh-actions-quota`. Re-running setup leaves an identical generated file unchanged
+and upgrades the previous unchanged generated template to this naming. If that
+path contains a modified workflow, setup refuses to overwrite it.
 
 Setup also scans `.github/workflows/*.yml` and
 `.github/workflows/*.yaml` (excluding the generated helper) and shows the files
@@ -33,7 +35,13 @@ in an interactive checklist. A leading `*` means that workflow currently has a
 quota caller. Use Up/Down to move, Space to toggle the `*`, and Enter to apply.
 Selecting a file adds the canonical caller with `secrets: inherit`; clearing an
 existing `*` removes that caller job again. A pre-existing different
-`jobs.quota` is never overwritten.
+`jobs.gh-actions-quota` is never overwritten. Existing callers of this reusable
+workflow, including older `jobs.quota` callers without `secrets: inherit`, are
+recognized and renamed to `gh-actions-quota` together with their dependencies
+and recognizable gates, before the optional job checklist. Setup migrates the
+existing job instead of adding another caller; it preserves unrelated jobs,
+conditions, comments and edited thresholds. Conflicting job IDs or custom quota
+references that cannot be migrated safely require manual editing.
 
 After workflow selection, setup asks **`Add quota conditions to individual jobs?
 [y/n]`**. Press `y` or `n` without Enter. Choosing `y` opens a grouped checklist:
@@ -48,9 +56,9 @@ editable **50% threshold directly in that job's workflow file**:
 
 ```yaml
   build:
-    needs: quota
+    needs: gh-actions-quota
     # Quota threshold (%): change 50 below to adjust this job's limit.
-    if: ${{ needs.quota.outputs.usage_available == 'true' && fromJSON(needs.quota.outputs.usage_percent) < 50 }}
+    if: ${{ needs.gh-actions-quota.outputs.usage_available == 'true' && fromJSON(needs.gh-actions-quota.outputs.usage_percent) < 50 }}
     runs-on: ubuntu-latest
 ```
 
@@ -94,14 +102,14 @@ permissions:
   contents: read
 
 jobs:
-  quota:
+  gh-actions-quota:
     uses: ./.github/workflows/gh-actions-quota.yml
     secrets: inherit
 
   expensive-ci:
-    needs: quota
+    needs: gh-actions-quota
     # Quota threshold (%): change 50 below to adjust this job's limit.
-    if: ${{ needs.quota.outputs.usage_available == 'true' && fromJSON(needs.quota.outputs.usage_percent) < 50 }}
+    if: ${{ needs.gh-actions-quota.outputs.usage_available == 'true' && fromJSON(needs.gh-actions-quota.outputs.usage_percent) < 50 }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6

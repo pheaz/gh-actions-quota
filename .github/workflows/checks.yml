@@ -55,13 +55,13 @@ jobs:
           grep -qx 'unmetered=true' "$RUNNER_TEMP/quota-output"
       - name: Run through action.yml in the public repository
         if: ${{ github.event.repository.private == false }}
-        id: quota
+        id: gh-actions-quota
         uses: ./
       - name: Verify action outputs
         if: ${{ github.event.repository.private == false }}
         env:
-          ALLOWED: ${{ steps.quota.outputs.allowed }}
-          UNMETERED: ${{ steps.quota.outputs.unmetered }}
+          ALLOWED: ${{ steps.gh-actions-quota.outputs.allowed }}
+          UNMETERED: ${{ steps.gh-actions-quota.outputs.unmetered }}
         run: |
           test "$ALLOWED" = true
           test "$UNMETERED" = true
