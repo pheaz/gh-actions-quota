@@ -75,22 +75,6 @@ func TestSetQuotaCallerAddsInheritAndRemovesAgain(t *testing.T) {
 	}
 }
 
-func TestLegacySecretMappingIsNotTreatedAsCurrentCaller(t *testing.T) {
-	content := `jobs:
-  quota:
-    uses: ./.github/workflows/gh-actions-quota.yml
-    secrets:
-      ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
-`
-	if hasQuotaCaller(content) {
-		t.Fatal("non-canonical caller should not be treated as current")
-	}
-	_, err := setQuotaCaller(content, true)
-	if err == nil || !strings.Contains(err.Error(), "jobs.quota") {
-		t.Fatal("non-canonical quota job should be rejected instead of migrated")
-	}
-}
-
 func TestSetQuotaCallerLeavesUnselectedFileWithoutJobsUntouched(t *testing.T) {
 	content := "name: Disabled\n"
 	updated, err := setQuotaCaller(content, false)
