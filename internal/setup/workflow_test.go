@@ -101,6 +101,12 @@ func TestEnsureReusableWorkflowMigratesLegacyTemplate(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0640); err != nil {
 				t.Fatal(err)
 			}
+			// Compare the actual mode: Windows does not implement Unix permission bits,
+			// and a Unix umask can alter the requested creation mode.
+			before, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
 			changed, err := ensureReusableWorkflow(root)
 			if custom {
 				if err == nil || changed {
@@ -121,7 +127,7 @@ func TestEnsureReusableWorkflowMigratesLegacyTemplate(t *testing.T) {
 				t.Fatal("unexpected workflow content")
 			}
 			info, err := os.Stat(path)
-			if err != nil || info.Mode().Perm() != 0640 {
+			if err != nil || info.Mode().Perm() != before.Mode().Perm() {
 				t.Fatal("file permissions changed")
 			}
 			if !custom {
