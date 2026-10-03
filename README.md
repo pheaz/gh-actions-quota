@@ -1,8 +1,59 @@
 # gh-actions-quota
 
-One repository ships a **GitHub Action** to gate expensive CI jobs and a native
-**GitHub CLI extension** to configure its billing token. Both share the same
-release version.
+Monitor your included GitHub Actions quota and prevent expensive CI jobs from
+running after a configurable usage threshold is reached.
+
+`gh-actions-quota` combines:
+
+- a **GitHub Action** for gating workflow jobs based on Actions quota usage;
+- a **GitHub CLI extension** for setup, authentication and quota status.
+
+It is designed for personal GitHub accounts using standard GitHub-hosted
+runners. Public repositories are detected as unmetered.
+
+## Quick start
+
+Install the GitHub CLI extension:
+
+```shell
+gh extension install philippwallrafen/gh-actions-quota
+```
+
+Check your current quota:
+
+```shell
+gh actions-quota status
+```
+
+Example:
+
+```text
+Repository: philippwallrafen/example
+Visibility: Private (metered)
+
+Setup:
+  Workflow: present
+  Secret:   present
+
+Actions quota:
+  Account: philippwallrafen
+  Used:    742.33 / 2000 min  ( 37.12% )
+  Plan:    Free
+```
+
+Configure a private repository:
+
+```shell
+gh actions-quota setup
+```
+
+The setup command creates the reusable quota workflow, authorizes the
+gh-actions-quota GitHub App for the repository owner's personal account and
+stores the required token as the repository secret `ACTIONS_QUOTA_TOKEN`.
+
+> [!NOTE]
+> Public repositories using standard GitHub-hosted runners do not consume the
+> personal included Actions quota and therefore require no repository setup.
 
 ## Setup
 
