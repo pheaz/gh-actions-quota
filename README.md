@@ -38,11 +38,11 @@ With `--init`, setup additionally scans `.github/workflows/*.yml` and
 `.github/workflows/*.yaml` (excluding the generated helper) and shows the files
 in an interactive checklist. A leading `*` means that workflow currently has a
 quota caller. Use Up/Down to move, Space to toggle the `*`, and Enter to apply.
-Selecting a file adds the caller; clearing an existing `*` removes that caller
-job again. Existing callers are normalized to `secrets: inherit`. A pre-existing
-different `jobs.quota` is never overwritten. The initializer deliberately does
-not guess which existing jobs are expensive; add `needs: quota` and the
-`allowed` condition to the jobs you want to gate.
+Selecting a file adds the canonical caller with `secrets: inherit`; clearing an
+existing `*` removes that caller job again. A pre-existing different
+`jobs.quota` is never overwritten. The initializer deliberately does not guess
+which existing jobs are expensive; add `needs: quota` and the `allowed`
+condition to the jobs you want to gate.
 
 The project never saves the token to a local file, passes it in command arguments
 or prints it. It remains in memory and is piped to `gh secret set` through stdin.
@@ -78,8 +78,9 @@ jobs:
       - run: swift test
 ```
 
-The generated reusable workflow defaults to a 50 percent threshold. Override it
-on the reusable-workflow call with `with: { threshold: 75 }` when needed.
+The generated reusable workflow runs its quota check on `ubuntu-slim` and
+defaults to a 50 percent threshold. Override it on the reusable-workflow call
+with `with: { threshold: 75 }` when needed.
 Usage below the threshold gives `allowed=true`. **Exactly at the threshold or
 above it, `allowed=false`.** Billing
 belongs to `GITHUB_REPOSITORY_OWNER`, never the actor or pull request author.
@@ -134,8 +135,8 @@ reported usage rather than a real-time spending limit.
 | Enterprise Cloud | 50,000 |
 
 Team and Enterprise mappings are retained; organization billing is not enabled
-by those mappings in v1. For an unusual or legacy personal plan, override the
-allowance explicitly:
+by those mappings in v1. For an unusual personal plan, override the allowance
+explicitly:
 
 ```yaml
 with:
@@ -167,8 +168,8 @@ separately billed and are outside this shortcut; do not use it as a gate for
 larger-runner spending.
 
 In private repositories, the small quota job **consumes runner time itself**.
-Use a cheap Linux job to gate expensive jobs. The action cannot prevent its own
-job from starting.
+The generated helper uses `ubuntu-slim` to keep that gate lightweight. The
+action cannot prevent its own job from starting.
 
 ## Development
 

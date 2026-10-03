@@ -225,16 +225,12 @@ func applyWorkflowChoices(root string, choices []workflowChoice) ([]string, erro
 }
 
 func hasQuotaCaller(content string) bool {
-	normalized := strings.ReplaceAll(content, "\r\n", "\n")
-	lines := strings.Split(normalized, "\n")
-	_, callers, _ := analyzeJobs(lines)
+	_, callers, _ := analyzeJobs(strings.Split(content, "\n"))
 	return len(callers) > 0
 }
 
 func setQuotaCaller(content string, selected bool) (string, error) {
-	crlf := strings.Contains(content, "\r\n")
-	normalized := strings.ReplaceAll(content, "\r\n", "\n")
-	lines := strings.Split(normalized, "\n")
+	lines := strings.Split(content, "\n")
 	jobsIndex, callers, blocks := analyzeJobs(lines)
 	if !selected && len(callers) == 0 {
 		return content, nil
@@ -250,12 +246,11 @@ func setQuotaCaller(content string, selected bool) (string, error) {
 		caller := callers[0]
 		result := append([]string{}, lines[:caller.start]...)
 		result = append(result, lines[caller.end:]...)
-		return restoreLineEndings(strings.Join(result, "\n"), crlf), nil
+		return strings.Join(result, "\n"), nil
 	}
 
 	if len(callers) == 1 {
-		result := normalizeCallerSecrets(lines, callers[0])
-		return restoreLineEndings(strings.Join(result, "\n"), crlf), nil
+		return content, nil
 	}
 
 	for _, block := range blocks {
@@ -269,54 +264,7 @@ func setQuotaCaller(content string, selected bool) (string, error) {
 	result = append(result, lines[:jobsIndex+1]...)
 	result = append(result, blockLines...)
 	result = append(result, lines[jobsIndex+1:]...)
-	return restoreLineEndings(strings.Join(result, "\n"), crlf), nil
-}
-
-func normalizeCallerSecrets(lines []string, caller jobBlock) []string {
-	result := append([]string{}, lines...)
-	secretsIndex := -1
-	secretsEnd := -1
-	usesIndex := -1
-
-	for i := caller.start + 1; i < caller.end; i++ {
-		trimmed := strings.TrimSpace(result[i])
-		if trimmed == "uses: ./.github/workflows/gh-actions-quota.yml" {
-			usesIndex = i
-		}
-		if leadingSpaces(result[i]) == 4 && strings.HasPrefix(trimmed, "secrets:") {
-			secretsIndex = i
-			secretsEnd = i + 1
-			for secretsEnd < caller.end {
-				line := result[secretsEnd]
-				if strings.TrimSpace(line) == "" {
-					secretsEnd++
-					continue
-				}
-				if leadingSpaces(line) <= 4 {
-					break
-				}
-				secretsEnd++
-			}
-			break
-		}
-	}
-
-	if secretsIndex >= 0 {
-		replacement := []string{"    secrets: inherit"}
-		updated := make([]string, 0, len(result)-(secretsEnd-secretsIndex)+1)
-		updated = append(updated, result[:secretsIndex]...)
-		updated = append(updated, replacement...)
-		updated = append(updated, result[secretsEnd:]...)
-		return updated
-	}
-	if usesIndex >= 0 {
-		updated := make([]string, 0, len(result)+1)
-		updated = append(updated, result[:usesIndex+1]...)
-		updated = append(updated, "    secrets: inherit")
-		updated = append(updated, result[usesIndex+1:]...)
-		return updated
-	}
-	return result
+	return strings.Join(result, "\n"), nil
 }
 
 func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
@@ -367,11 +315,18 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 		id = strings.Trim(id, "'\"")
 		block := jobBlock{id: id, start: start, end: end}
 		blocks = append(blocks, block)
+		hasUses := false
+		hasInheritedSecrets := false
 		for i := start + 1; i < end; i++ {
-			if strings.TrimSpace(lines[i]) == "uses: ./.github/workflows/gh-actions-quota.yml" {
-				callers = append(callers, block)
-				break
+			switch strings.TrimSpace(lines[i]) {
+			case "uses: ./.github/workflows/gh-actions-quota.yml":
+				hasUses = true
+			case "secrets: inherit":
+				hasInheritedSecrets = true
 			}
+		}
+		if hasUses && hasInheritedSecrets {
+			callers = append(callers, block)
 		}
 	}
 	return jobsIndex, callers, blocks
@@ -379,11 +334,4 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 
 func leadingSpaces(line string) int {
 	return len(line) - len(strings.TrimLeft(line, " "))
-}
-
-func restoreLineEndings(content string, crlf bool) string {
-	if crlf {
-		return strings.ReplaceAll(content, "\n", "\r\n")
-	}
-	return content
 }
