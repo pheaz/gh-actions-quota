@@ -14,8 +14,8 @@ gh extension install philippwallrafen/gh-actions-quota
 gh actions-quota setup
 ```
 
-Use `--init` when you also want setup to scan existing workflow files and ask
-which ones should receive the reusable quota caller:
+Use `--init` when you also want setup to scan existing workflow files and open
+an interactive checklist for the reusable quota caller:
 
 ```shell
 gh actions-quota setup --init
@@ -35,11 +35,14 @@ Re-running setup leaves an identical generated file unchanged; if that path
 contains a modified workflow, setup refuses to overwrite it.
 
 With `--init`, setup additionally scans `.github/workflows/*.yml` and
-`.github/workflows/*.yaml` (excluding the generated helper) and asks for each
-file whether to insert a `quota` caller job. Existing callers are detected and
-left unchanged. A pre-existing different `jobs.quota` is never overwritten.
-The initializer deliberately does not guess which existing jobs are expensive;
-add `needs: quota` and the `allowed` condition to the jobs you want to gate.
+`.github/workflows/*.yaml` (excluding the generated helper) and shows the files
+in an interactive checklist. A leading `*` means that workflow currently has a
+quota caller. Use Up/Down to move, Space to toggle the `*`, and Enter to apply.
+Selecting a file adds the caller; clearing an existing `*` removes that caller
+job again. Existing callers are normalized to `secrets: inherit`. A pre-existing
+different `jobs.quota` is never overwritten. The initializer deliberately does
+not guess which existing jobs are expensive; add `needs: quota` and the
+`allowed` condition to the jobs you want to gate.
 
 The project never saves the token to a local file, passes it in command arguments
 or prints it. It remains in memory and is piped to `gh secret set` through stdin.
@@ -64,8 +67,7 @@ permissions:
 jobs:
   quota:
     uses: ./.github/workflows/gh-actions-quota.yml
-    secrets:
-      ACTIONS_QUOTA_TOKEN: ${{ secrets.ACTIONS_QUOTA_TOKEN }}
+    secrets: inherit
 
   expensive-ci:
     needs: quota
@@ -173,7 +175,8 @@ job from starting.
 The action uses strict TypeScript and esbuild, targeting Node.js 24. Its complete
 bundle is committed at `dist/index.js`; `action.yml` runs it with `node24`.
 Node.js and the JavaScript package manager are development/build tools only.
-The extension uses Go 1.27.1 or newer and has no third-party Go dependencies.
+The extension uses Go 1.27.1 or newer. It uses `golang.org/x/term` for the
+cross-platform interactive `--init` checklist.
 
 After installing the locked development dependencies, validate the action with:
 
