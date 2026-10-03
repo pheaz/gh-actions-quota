@@ -46,22 +46,22 @@ func Run(ctx context.Context, input io.Reader, output io.Writer) error {
 
 func newSetup(input io.Reader, output io.Writer) *setup {
 	return &setup{
-		gh:        ghRunner{},
-		client:    newClient(),
-		input:     input,
-		output:    output,
-		browser:   openBrowser,
+		gh:          ghRunner{},
+		client:      newClient(),
+		input:       input,
+		output:      output,
+		browser:     openBrowser,
 		clipboard:   copyToClipboard,
 		credentials: newCredentialStore(),
 	}
 }
 
 type setup struct {
-	gh        runner
-	client    *client
-	input     io.Reader
-	output    io.Writer
-	browser   func(context.Context, string) error
+	gh          runner
+	client      *client
+	input       io.Reader
+	output      io.Writer
+	browser     func(context.Context, string) error
 	clipboard   func(context.Context, string) error
 	credentials credentialStore
 	root        string
@@ -123,7 +123,7 @@ func (s *setup) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Token exists only in memory and this pipe, never in argv or a local file.
+	// Token reaches gh only through this pipe, never through argv or command output.
 	if _, err := s.gh.Run(ctx, []string{"secret", "set", secretName, "--repo", repo.Name}, strings.NewReader(token)); err != nil {
 		return errors.New("could not store ACTIONS_QUOTA_TOKEN; check your local gh login and repository secret write access, then run setup again")
 	}
