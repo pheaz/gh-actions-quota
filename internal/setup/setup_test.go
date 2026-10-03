@@ -24,6 +24,7 @@ type fakeGH struct {
 	repository   string
 	repoResponse string
 	currentUser  string
+	secretPresent bool
 	public       bool
 	failAt       int
 }
@@ -108,6 +109,14 @@ func (g *fakeGH) Run(_ context.Context, args []string, input io.Reader) ([]byte,
 			return []byte(g.ownerType), nil
 		}
 		return []byte("User\n"), nil
+	case "secret":
+		if len(args) > 1 && args[1] == "list" {
+			if g.secretPresent {
+				return []byte(`[{"name":"ACTIONS_QUOTA_TOKEN"}]`), nil
+			}
+			return []byte(`[]`), nil
+		}
+		return nil, nil
 	default:
 		return nil, nil
 	}
