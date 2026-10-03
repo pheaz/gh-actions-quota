@@ -3,7 +3,6 @@ package setup
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -36,184 +35,115 @@ func repositorySnapshot(t *testing.T, root string) map[string]string {
 
 func TestStatusPublicUsesCurrentPersonalAccount(t *testing.T) {
 	for _, repository := range []string{"some-org/example", "other-user/example"} {
-		for _, cached := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s/cached=%t", repository, cached), func(t *testing.T) {
-				gh := &fakeGH{public: true, ownerType: "Organization", repository: repository}
-				s, output, _ := setupFixture(t, gh, validAccount, 0)
-				store := s.credentials.(*fakeCredentialStore)
-				if cached {
-					store.token = fakeToken
-				}
-				var endpoints []string
-				s.client = testClient(t, func(w http.ResponseWriter, r *http.Request) {
-					endpoints = append(endpoints, r.URL.Path)
-					if !strings.HasPrefix(r.URL.Path, "/login/") && r.Header.Get("Authorization") != "Bearer "+fakeToken {
-						t.Error("wrong app authorization")
-					}
-					switch r.URL.Path {
-					case "/login/device/code":
-						io.WriteString(w, deviceJSON)
-					case "/login/oauth/access_token":
-						io.WriteString(w, `{"access_token":"`+fakeToken+`","token_type":"bearer"}`)
-					case "/user":
-						io.WriteString(w, `{"login":"SIGNED-IN","type":"User","plan":{"name":"free"}}`)
-					case "/users/signed-in/settings/billing/usage":
-						json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
-							billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
-							billingItem(18, map[string]any{"repositoryName": repository}),
-						}})
-					case "/repos/signed-in/private":
-						io.WriteString(w, `{"private":true}`)
-					case "/repos/" + repository:
-						io.WriteString(w, `{"private":false}`)
-					default:
-						t.Errorf("unexpected endpoint: %s", r.URL.Path)
-					}
-				})
-				browserCalls, clipboardCalls := 0, 0
-				s.browser = func(_ context.Context, uri string) error {
-					browserCalls++
-					if uri != "https://github.com/login/device" {
-						t.Error("wrong device URL")
-					}
-					return nil
-				}
-				s.clipboard = func(_ context.Context, code string) error {
-					clipboardCalls++
-					if code != "ABCD-EFGH" {
-						t.Error("wrong clipboard code")
-					}
-					return nil
-				}
-				before := repositorySnapshot(t, s.root)
-				if err := s.status(context.Background()); err != nil {
-					t.Fatal(err)
-				}
-				wantEndpoints := []string{"/user", "/users/signed-in/settings/billing/usage", "/repos/signed-in/private", "/repos/" + repository}
-				fresh := 0
-				if !cached {
-					fresh = 1
-					wantEndpoints = append([]string{"/login/device/code", "/login/oauth/access_token"}, wantEndpoints...)
-					if !strings.Contains(output.String(), "Code copied to clipboard: ABCD-EFGH") || !reflect.DeepEqual(store.savedAccounts, []string{"signed-in"}) {
-						t.Fatal("fresh public authorization was not copied and saved for the current account")
-					}
-				}
-				if browserCalls != fresh || clipboardCalls != fresh || !reflect.DeepEqual(endpoints, wantEndpoints) {
-					t.Fatalf("wrong public authentication/billing requests: %v", endpoints)
-				}
-				if store.loads != 1 || store.saves != fresh || store.deletes != 0 || store.token != fakeToken || !reflect.DeepEqual(store.loadedAccounts, []string{"signed-in"}) {
-					t.Fatalf("wrong public credential operations: %+v", store)
-				}
-				if !reflect.DeepEqual(gh.calls, []ghCall{
-					{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
-					{args: []string{"api", "user", "--hostname", "github.com"}},
-					{args: []string{"secret", "list", "--repo", repository, "--json", "name"}},
-				}) {
-					t.Fatalf("unexpected public gh calls: %v", gh.calls)
-				}
-				wantHeader := "Repository: " + repository + "\nVisibility: Public (unmetered)\n"
-				wantQuota := "\nActions quota:\n  Account: signed-in\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
-				if !strings.HasPrefix(output.String(), wantHeader) || !strings.HasSuffix(output.String(), wantQuota) || (cached && output.String() != wantHeader+wantQuota) {
-					t.Fatalf("wrong public output: %s", output)
-				}
-				if strings.Contains(output.String(), fakeToken) || !reflect.DeepEqual(before, repositorySnapshot(t, s.root)) {
-					t.Fatal("public status exposed credentials or modified repository files")
-				}
-			})
-		}
-	}
-}
-
-func TestStatusPrivateUsesDeviceFlowAndStaysReadOnly(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		used     float64
-		usedText string
-		percent  string
-	}{
-		{"partial", 742.33, "742.33", "37.12"},
-		{"empty", 0, "0.00", "0.00"},
-		{"over quota", 2500, "2500.00", "125.00"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			gh := &fakeGH{}
+		t.Run(repository, func(t *testing.T) {
+			gh := &fakeGH{public: true, ownerType: "Organization", repository: repository}
 			s, output, _ := setupFixture(t, gh, validAccount, 0)
+			store := s.credentials.(*fakeCredentialStore)
+			store.token = fakeToken
+
 			var endpoints []string
 			s.client = testClient(t, func(w http.ResponseWriter, r *http.Request) {
 				endpoints = append(endpoints, r.URL.Path)
+				if r.Header.Get("Authorization") != "Bearer "+fakeToken {
+					t.Error("wrong app authorization")
+				}
 				switch r.URL.Path {
-				case "/login/device/code":
-					io.WriteString(w, deviceJSON)
-				case "/login/oauth/access_token":
-					io.WriteString(w, `{"access_token":"`+fakeToken+`","token_type":"bearer"}`)
 				case "/user":
-					io.WriteString(w, `{"login":"owner","type":"User","plan":{"name":"free"}}`)
-				case "/users/owner/settings/billing/usage":
+					io.WriteString(w, `{"login":"SIGNED-IN","type":"User","plan":{"name":"free"}}`)
+				case "/users/signed-in/settings/billing/usage":
 					json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
-						billingItem(test.used*linuxMinutePriceUSD, nil),
-						billingItem(18, map[string]any{"repositoryName": "owner/public"}),
+						billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
+						billingItem(18, map[string]any{"repositoryName": repository}),
 					}})
-				case "/repos/owner/private":
+				case "/repos/signed-in/private":
 					io.WriteString(w, `{"private":true}`)
-				case "/repos/owner/public":
+				case "/repos/" + repository:
 					io.WriteString(w, `{"private":false}`)
 				default:
 					t.Errorf("unexpected endpoint: %s", r.URL.Path)
 				}
 			})
-			browserCalls := 0
-			s.browser = func(_ context.Context, uri string) error {
-				browserCalls++
-				if uri != "https://github.com/login/device" {
-					t.Error("wrong device URL")
-				}
-				return nil
-			}
-			clipboardCalls := 0
-			s.clipboard = func(_ context.Context, code string) error {
-				clipboardCalls++
-				if code != "ABCD-EFGH" {
-					t.Errorf("wrong clipboard code: %s", code)
-				}
-				return nil
-			}
-			if err := os.MkdirAll(filepath.Join(s.root, ".github", "workflows"), 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(s.root, ".github", "workflows", "ci.yml"), []byte("jobs:\n  build:\n    runs-on: ubuntu-latest\n"), 0644); err != nil {
-				t.Fatal(err)
-			}
+			s.browser = func(context.Context, string) error { t.Fatal("status opened browser"); return nil }
+			s.clipboard = func(context.Context, string) error { t.Fatal("status used clipboard"); return nil }
+
 			before := repositorySnapshot(t, s.root)
 			if err := s.status(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if browserCalls != 1 || clipboardCalls != 1 || !reflect.DeepEqual(endpoints, []string{"/login/device/code", "/login/oauth/access_token", "/user", "/users/owner/settings/billing/usage", "/repos/owner/private", "/repos/owner/public"}) {
-				t.Fatalf("wrong authentication/billing requests: %v", endpoints)
+			wantEndpoints := []string{"/user", "/users/signed-in/settings/billing/usage", "/repos/signed-in/private", "/repos/" + repository}
+			if !reflect.DeepEqual(endpoints, wantEndpoints) {
+				t.Fatalf("wrong public billing requests: %v", endpoints)
 			}
-			store := s.credentials.(*fakeCredentialStore)
-			if store.saves != 1 || store.token != fakeToken || !reflect.DeepEqual(store.loadedAccounts, []string{"owner"}) || !reflect.DeepEqual(store.savedAccounts, []string{"owner"}) {
-				t.Fatal("status did not persist fresh authorization")
+			if store.loads != 1 || store.saves != 0 || store.deletes != 0 || !reflect.DeepEqual(store.loadedAccounts, []string{"signed-in"}) {
+				t.Fatalf("wrong public credential operations: %+v", store)
 			}
 			if !reflect.DeepEqual(gh.calls, []ghCall{
 				{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
-				{args: []string{"api", "users/owner", "--hostname", "github.com", "--jq", ".type"}},
-				{args: []string{"secret", "list", "--repo", "owner/repo", "--json", "name"}},
+				{args: []string{"api", "user", "--hostname", "github.com"}},
+				{args: []string{"secret", "list", "--repo", repository, "--json", "name"}},
 			}) {
-				t.Fatalf("status called gh secret set or another unexpected command: %v", gh.calls)
+				t.Fatalf("unexpected public gh calls: %v", gh.calls)
 			}
-			for _, want := range []string{"Repository: owner/repo\nVisibility: Private (metered)\n", "Code copied to clipboard: ABCD-EFGH"} {
-				if !strings.Contains(output.String(), want) {
-					t.Errorf("missing status output %q: %s", want, output)
-				}
-			}
-			wantQuota := "\nActions quota:\n  Account: owner\n  Used:    " + test.usedText + " / 2000 min  ( " + test.percent + "% )\n  Plan:    Free\n"
-			if !strings.HasSuffix(output.String(), wantQuota) || strings.Contains(output.String(), "Remaining") || strings.Contains(output.String(), "Usage:") {
-				t.Fatalf("wrong quota formatting: %s", output)
+			want := "Repository: " + repository + "\nVisibility: Public (unmetered)\n\nActions quota:\n  Account: signed-in\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
+			if output.String() != want {
+				t.Fatalf("wrong public output: %s", output)
 			}
 			if strings.Contains(output.String(), fakeToken) || !reflect.DeepEqual(before, repositorySnapshot(t, s.root)) {
-				t.Fatal("private status exposed credentials or modified repository files")
+				t.Fatal("public status exposed credentials or modified repository files")
 			}
 		})
+	}
+}
+
+func TestStatusPublicRequiresStoredAuthenticationWithoutDeviceFlow(t *testing.T) {
+	gh := &fakeGH{public: true, repository: "some-org/example"}
+	s, output, requests := setupFixture(t, gh, validAccount, 0)
+	s.browser = func(context.Context, string) error { t.Fatal("status opened browser"); return nil }
+	s.clipboard = func(context.Context, string) error { t.Fatal("status used clipboard"); return nil }
+
+	err := s.status(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not authenticated with gh-actions-quota for signed-in") ||
+		!strings.Contains(err.Error(), "gh actions-quota auth login") {
+		t.Fatalf("missing authentication guidance: %v", err)
+	}
+	store := s.credentials.(*fakeCredentialStore)
+	if *requests != 0 || store.loads != 1 || store.saves != 0 || store.deletes != 0 {
+		t.Fatalf("status started authorization or changed credentials: requests=%d store=%+v", *requests, store)
+	}
+	want := "Repository: some-org/example\nVisibility: Public (unmetered)\n"
+	if output.String() != want {
+		t.Fatalf("wrong unauthenticated public output: %s", output)
+	}
+}
+
+func TestStatusPrivateRequiresStoredAuthenticationWithoutDeviceFlow(t *testing.T) {
+	gh := &fakeGH{}
+	s, output, requests := setupFixture(t, gh, validAccount, 0)
+	s.browser = func(context.Context, string) error { t.Fatal("status opened browser"); return nil }
+	s.clipboard = func(context.Context, string) error { t.Fatal("status used clipboard"); return nil }
+
+	before := repositorySnapshot(t, s.root)
+	err := s.status(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not authenticated with gh-actions-quota for owner") {
+		t.Fatalf("missing private authentication requirement: %v", err)
+	}
+	store := s.credentials.(*fakeCredentialStore)
+	if *requests != 0 || store.loads != 1 || store.saves != 0 || store.deletes != 0 {
+		t.Fatalf("private status started authorization or changed credentials: requests=%d store=%+v", *requests, store)
+	}
+	if !reflect.DeepEqual(gh.calls, []ghCall{
+		{args: []string{"repo", "view", "--json", "nameWithOwner,isPrivate"}},
+		{args: []string{"api", "users/owner", "--hostname", "github.com", "--jq", ".type"}},
+		{args: []string{"secret", "list", "--repo", "owner/repo", "--json", "name"}},
+	}) {
+		t.Fatalf("unexpected private gh calls: %v", gh.calls)
+	}
+	want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n"
+	if output.String() != want {
+		t.Fatalf("wrong unauthenticated private output: %s", output)
+	}
+	if strings.Contains(output.String(), fakeToken) || !reflect.DeepEqual(before, repositorySnapshot(t, s.root)) {
+		t.Fatal("private status exposed credentials or modified repository files")
 	}
 }
 

@@ -19,9 +19,10 @@ Install the GitHub CLI extension:
 gh extension install philippwallrafen/gh-actions-quota
 ```
 
-Check your current quota:
+Authenticate the quota account once, then check the current quota:
 
 ```shell
+gh actions-quota auth login
 gh actions-quota status
 ```
 
@@ -47,9 +48,10 @@ Configure a private repository:
 gh actions-quota setup
 ```
 
-The setup command creates the reusable quota workflow, authorizes the
-gh-actions-quota GitHub App for the repository owner's personal account and
-stores the required token as the repository secret `ACTIONS_QUOTA_TOKEN`.
+The setup command creates the reusable quota workflow and stores the required
+token as the repository secret `ACTIONS_QUOTA_TOKEN`. For private repositories,
+setup can also start the GitHub App device flow automatically when no reusable
+authorization exists.
 
 > [!NOTE]
 > Public repositories using standard GitHub-hosted runners do not consume the
@@ -152,18 +154,83 @@ be adjusted there. Jobs that you leave unselected must be configured manually
 if you want them to be gated.
 
 The project never saves the token to a plaintext file, passes it in command
-arguments or prints it. For setup and status it persists the token only
-in the operating system's secure credential store: macOS Keychain, Windows
-Credential Manager, or the Linux Secret Service via `secret-tool`. If secure
-storage is unavailable, the command still works with an in-memory token and asks
-for authorization again next time; there is no plaintext fallback. Repository
-secret writes continue to pipe the token to `gh secret set` through stdin.
-There is no server, central token store or telemetry.
+arguments or prints it. Setup and `auth login` persist authorization only in
+the operating system's secure credential store: macOS Keychain, Windows
+Credential Manager, or the Linux Secret Service via `secret-tool`. Explicit
+`auth login` requires secure storage so a successful login is actually reusable.
+Private-repository setup can still continue with an in-memory authorization when
+secure storage is unavailable and will request authorization again next time.
+`status` never starts device flow and requires a stored authorization.
+Repository secret writes continue to pipe the token to `gh secret set` through
+stdin. There is no server, central token store or telemetry.
 
 Organization-owned repositories are **not supported for metered billing in v1**.
 Public repositories using standard GitHub-hosted runners need no workflow setup
 or repository token. Status can still show a personal account's private quota
 from a public repository, including one owned by an organization.
+
+## Authentication
+
+GitHub CLI authentication and gh-actions-quota App authentication are separate:
+
+```shell
+gh auth login
+gh actions-quota auth login
+```
+
+Manage the account-scoped gh-actions-quota authorization explicitly with:
+
+```shell
+gh actions-quota auth login
+gh actions-quota auth status
+gh actions-quota auth logout
+```
+
+Inside a private repository, these commands target the personal account that owns
+the repository. Inside a public repository, or outside any repository, they
+target the personal account currently authenticated with `gh` on github.com.
+
+`auth login` reuses a valid stored authorization or starts GitHub's device flow
+and stores the resulting App token in the operating system's secure credential
+store. `auth status` validates the stored credential without opening a browser.
+`auth logout` removes only that local credential. It does not revoke the GitHub
+App authorization on GitHub and does not change repository workflows or secrets.
+
+Private-repository `setup` remains the intentional exception: setup may start
+device flow automatically when authorization is required. Other read-only
+commands such as `status` do not.
+
+## Uninstall
+
+Remove repository-specific gh-actions-quota setup with:
+
+```shell
+gh actions-quota uninstall
+```
+
+Uninstall removes recognized quota callers and job gates from local workflow
+files, removes the generated `.github/workflows/gh-actions-quota.yml` helper,
+and deletes the repository secret `ACTIONS_QUOTA_TOKEN` when present. The
+account-scoped App authorization is kept; use `gh actions-quota auth logout`
+when you also want to remove the local credential.
+
+The command only removes structures it can identify safely. A modified generated
+helper or a custom/ambiguous quota expression must be reconciled manually before
+uninstall continues.
+
+## Shell completion
+
+The CLI uses Cobra and can generate completion scripts for the supported shells:
+
+```shell
+gh actions-quota completion bash
+gh actions-quota completion zsh
+gh actions-quota completion fish
+gh actions-quota completion powershell
+```
+
+Load or install the generated script using the normal completion mechanism for
+your shell.
 
 ## Status
 
@@ -244,15 +311,16 @@ displayed personal account's private Actions usage across its repositories:
 the current `gh` account for public repositories or when no repository is found,
 and the repository owner for private repositories.
 
-Both public and private status reuse the relevant account's cached GitHub App
-authorization. The device flow is shown only when no usable credential exists,
-when it was revoked or belongs to the wrong account, or when secure storage was
-unavailable on the previous run. Fresh device codes use the same clipboard
-behavior as setup and valid credentials are stored for reuse across repositories.
+Both public and private status require a usable authorization already stored for
+the relevant quota account. Status never starts device flow or writes a new
+credential. If the credential is missing, invalid, revoked, or belongs to the
+wrong account, status exits with guidance to run:
+
+```shell
+gh actions-quota auth login
+```
 
 Status does not modify repository files or secrets and never logs the token.
-A successful fresh authorization may create or replace the account-scoped entry
-in the operating system's secure credential store.
 
 ## Workflow
 

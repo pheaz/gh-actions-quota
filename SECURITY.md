@@ -50,7 +50,13 @@ storage:
 - Windows Credential Manager;
 - Linux Secret Service through `secret-tool`.
 
-When secure storage is unavailable, authorization remains in memory only.
+Explicit `gh actions-quota auth login` requires secure credential storage so a
+successful login remains reusable. Private-repository `setup` can fall back to
+an in-memory authorization when secure storage is unavailable; in that case a
+new authorization is required on the next run.
+
+`gh actions-quota status` never starts device flow. It only reads and validates
+an existing account-scoped credential.
 
 Repository token installation passes the token to `gh secret set` through
 standard input rather than through command-line arguments.

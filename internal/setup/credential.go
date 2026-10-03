@@ -43,6 +43,39 @@ func shouldReplaceCachedCredential(err error) bool {
 	return errors.As(err, &httpError) && (httpError.status == http.StatusUnauthorized || httpError.status == http.StatusForbidden)
 }
 
+func authenticationRequired(owner string) error {
+	return fmt.Errorf("not authenticated with gh-actions-quota for %s; run gh actions-quota auth login", owner)
+}
+
+func (s *setup) storedAuthorizationForOwner(ctx context.Context, owner string) (string, string, int, error) {
+	if s.credentials == nil {
+		return "", "", 0, errors.New("secure credential storage unavailable; gh actions-quota status requires a stored authorization")
+	}
+	token, err := s.credentials.Load(ctx, owner)
+	if err != nil {
+		if errors.Is(err, errCredentialNotFound) {
+			return "", "", 0, authenticationRequired(owner)
+		}
+		if errors.Is(err, errCredentialStoreUnavailable) {
+			return "", "", 0, errors.New("secure credential storage unavailable; gh actions-quota status requires a stored authorization")
+		}
+		return "", "", 0, errors.New("could not read secure credential storage")
+	}
+	if !validCachedToken(token) {
+		_ = s.credentials.Delete(ctx, owner)
+		return "", "", 0, authenticationRequired(owner)
+	}
+	plan, quota, err := s.client.checkAccount(ctx, owner, token)
+	if err == nil {
+		return token, plan, quota, nil
+	}
+	if shouldReplaceCachedCredential(err) {
+		_ = s.credentials.Delete(ctx, owner)
+		return "", "", 0, authenticationRequired(owner)
+	}
+	return "", "", 0, err
+}
+
 func (s *setup) authorizationForOwner(ctx context.Context, owner string) (string, string, int, error) {
 	if s.credentials != nil {
 		if token, err := s.credentials.Load(ctx, owner); err == nil {
