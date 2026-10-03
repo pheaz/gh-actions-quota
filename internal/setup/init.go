@@ -335,4 +335,3 @@ func analyzeJobs(lines []string) (int, []jobBlock, []jobBlock) {
 func leadingSpaces(line string) int {
 	return len(line) - len(strings.TrimLeft(line, " "))
 }
-
