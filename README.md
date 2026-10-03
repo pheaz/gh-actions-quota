@@ -10,7 +10,7 @@ Install [GitHub CLI](https://cli.github.com/) and authenticate with
 `gh auth login`. Then run these commands from the repository that will use the action:
 
 ```shell
-gh extension install philippwallrafen/gh-actions-quota
+gh extension install philippwallrafen/gh-actions-quota --force
 gh actions-quota setup
 ```
 
