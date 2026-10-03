@@ -41,7 +41,7 @@ permissions:
 jobs:
   quota:
     name: CI quota control
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       allowed: ${{ steps.quota.outputs.allowed }}
       usage_available: ${{ steps.quota.outputs['usage-available'] }}
