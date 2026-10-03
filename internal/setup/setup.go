@@ -51,7 +51,8 @@ func newSetup(input io.Reader, output io.Writer) *setup {
 		input:     input,
 		output:    output,
 		browser:   openBrowser,
-		clipboard: copyToClipboard,
+		clipboard:   copyToClipboard,
+		credentials: newCredentialStore(),
 	}
 }
 
@@ -61,8 +62,9 @@ type setup struct {
 	input     io.Reader
 	output    io.Writer
 	browser   func(context.Context, string) error
-	clipboard func(context.Context, string) error
-	root      string
+	clipboard   func(context.Context, string) error
+	credentials credentialStore
+	root        string
 }
 
 func (s *setup) run(ctx context.Context) error {
@@ -113,11 +115,7 @@ func (s *setup) run(ctx context.Context) error {
 
 	fmt.Fprintln(s.output, "Private repository: requesting gh-actions-quota Account Plan read access...")
 
-	token, err := s.authorize(ctx, true)
-	if err != nil {
-		return err
-	}
-	plan, quota, err := s.client.checkAccount(ctx, owner, token)
+	token, plan, quota, err := s.authorizationForOwner(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -190,7 +188,7 @@ func (c *client) checkAccount(ctx context.Context, owner, token string) (string,
 		return "", 0, err
 	}
 	if !strings.EqualFold(account.Login, owner) || !strings.EqualFold(account.Type, "User") {
-		return "", 0, errors.New("the authorized personal GitHub account must be the repository owner; run setup again and authorize as the owner")
+		return "", 0, errAuthorizedAccountMismatch
 	}
 	plan := strings.ToLower(strings.TrimSpace(account.Plan.Name))
 	quota := map[string]int{"free": 2000, "pro": 3000, "team": 3000, "enterprise": 50000, "enterprise cloud": 50000}[plan]
