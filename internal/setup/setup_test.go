@@ -3,6 +3,7 @@ package setup
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -146,7 +147,7 @@ func setupFixture(t *testing.T, gh *fakeGH, account string, billingStatus int) (
 				io.WriteString(w, fakeToken)
 				return
 			}
-			io.WriteString(w, `{"usageItems":[{"product":"Actions","unitType":"minutes","sku":"actions_windows","repositoryName":"owner/repo","discountAmount":6.13},{"product":"Actions","unitType":"minutes","sku":"actions_macos","repositoryName":"owner/repo","discountAmount":5.87}]}`)
+			json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{billingItem(120, map[string]any{"repositoryName": "owner/repo", "sku": "Actions Windows"}), billingItem(174.193548387, map[string]any{"repositoryName": "owner/repo", "sku": "Actions macOS 3-core"})}})
 		case "/repos/owner/repo":
 			io.WriteString(w, `{"private":true}`)
 		default:

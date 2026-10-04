@@ -69,7 +69,7 @@ func (s *setup) status(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	used, err := s.client.checkBilling(ctx, account, token)
+	used, err := s.client.checkBilling(ctx, account, token, "user")
 	if err != nil {
 		return err
 	}

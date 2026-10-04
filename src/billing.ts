@@ -1,19 +1,25 @@
-import { API_VERSION, INCLUDED_MINUTES_BY_PLAN, LINUX_MINUTE_PRICE_USD } from "./constants.js";
+import { API_VERSION, INCLUDED_MINUTES_BY_PLAN, LINUX_BASE_PRICE_USD } from "./constants.js";
 
 export type Fetch = typeof fetch;
 export type OwnerType = "user" | "organization";
 
-const INCLUDED_SKUS = new Set([
-  "actions_linux_slim",
-  "actions_linux",
-  "actions_linux_arm",
-  "actions_windows",
-  "actions_windows_arm",
-  "actions_macos",
-]);
+// Quota usage is normalized to the standard Linux 2-core rate:
+// effective minutes = runtime minutes × (SKU price / $0.006).
+// Keep prices and the corresponding Linux-equivalent factors visible here
+// because they define the quota estimate.
+const SKU_PRICE_PER_MINUTE_USD: Readonly<Record<string, number>> = {
+  actions_linux_slim: 0.002, // 0.3333× Linux
+  actions_linux_arm: 0.005, // 0.8333× Linux
+  actions_linux: 0.006, // 1.0000× Linux
+  actions_windows: 0.010, // 1.6667× Linux
+  actions_windows_arm: 0.010, // 1.6667× Linux
+  actions_macos: 0.062, // 10.3333× Linux
+} as const;
 
 function normalizeSku(sku: unknown): string {
-  return typeof sku === "string" ? sku.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  const normalized = typeof sku === "string" ? sku.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  // Standard macOS runners have 3 or 4 cores; larger core counts stay excluded.
+  return normalized === "actions_macos_3_core" || normalized === "actions_macos_4_core" ? "actions_macos" : normalized;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -53,7 +59,7 @@ export async function requestJson(url: string, token: string, fetchImpl: Fetch =
   }
 }
 
-async function isPublicRepository(repository: string, token: string, fetchImpl: Fetch): Promise<boolean> {
+async function isPrivateRepository(repository: string, token: string, fetchImpl: Fetch): Promise<boolean> {
   const [owner, name] = repository.split("/", 2);
   if (!owner || !name) return false;
   const response = await request(
@@ -63,7 +69,7 @@ async function isPublicRepository(repository: string, token: string, fetchImpl: 
   if (response.status === 404) return false;
   if (!response.ok) throw new Error("GitHub repository lookup failed");
   try {
-    return object(await response.json()).private === false;
+    return object(await response.json()).private === true;
   } catch {
     throw new Error("GitHub API returned an invalid response");
   }
@@ -74,28 +80,30 @@ export async function parseUsedMinutes(payload: unknown, token: string, fetchImp
   if (!Array.isArray(report.usageItems)) {
     throw new Error("GitHub billing response must contain usageItems");
   }
-  const publicRepositories = new Map<string, boolean>();
-  let discountedUSD = 0;
+  // Visibility is current; historical public/private changes are not reflected here.
+  const privateRepositories = new Map<string, boolean>();
+  let usedMinutes = 0;
   for (const candidate of report.usageItems) {
     const item = object(candidate);
+    const skuPrice = SKU_PRICE_PER_MINUTE_USD[normalizeSku(item.sku)];
     if (
-      item.product !== "Actions" ||
-      item.unitType !== "minutes" ||
-      !INCLUDED_SKUS.has(normalizeSku(item.sku)) ||
+      typeof item.product !== "string" || item.product.toLowerCase() !== "actions" ||
+      typeof item.unitType !== "string" || item.unitType.toLowerCase() !== "minutes" ||
+      typeof skuPrice !== "number" ||
       typeof item.repositoryName !== "string"
     ) continue;
-    if (!publicRepositories.has(item.repositoryName)) {
-      publicRepositories.set(item.repositoryName, await isPublicRepository(item.repositoryName, token, fetchImpl));
+    if (!privateRepositories.has(item.repositoryName)) {
+      privateRepositories.set(item.repositoryName, await isPrivateRepository(item.repositoryName, token, fetchImpl));
     }
-    if (publicRepositories.get(item.repositoryName)) continue;
-    if (typeof item.discountAmount !== "number" || !Number.isFinite(item.discountAmount) || item.discountAmount < 0) {
-      throw new Error("Invalid discountAmount");
+    if (!privateRepositories.get(item.repositoryName)) continue;
+    if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity < 0) {
+      throw new Error("Invalid quantity");
     }
-    discountedUSD += item.discountAmount;
+    const factor = skuPrice / LINUX_BASE_PRICE_USD;
+    usedMinutes += item.quantity * factor;
   }
-  const minutes = discountedUSD / LINUX_MINUTE_PRICE_USD;
-  if (!Number.isFinite(minutes)) throw new Error("GitHub billing usage is out of range");
-  return minutes;
+  if (!Number.isFinite(usedMinutes)) throw new Error("GitHub billing usage is out of range");
+  return usedMinutes;
 }
 
 export async function fetchOwnerType(owner: string, token: string, fetchImpl: Fetch = fetch): Promise<OwnerType> {
@@ -134,14 +142,14 @@ export async function fetchUsedMinutes(
   { ownerType, now = new Date(), fetchImpl = fetch }: { ownerType?: OwnerType; now?: Date; fetchImpl?: Fetch } = {},
 ): Promise<number> {
   const type = ownerType || await fetchOwnerType(owner, token, fetchImpl);
-  if (type !== "user") throw new Error("Organization billing is not supported in v1");
+  const endpoint = type === "organization" ? "organizations" : "users";
   const query = new URLSearchParams({
     year: String(now.getUTCFullYear()),
     month: String(now.getUTCMonth() + 1),
     product: "Actions",
   });
   const payload = await requestJson(
-    `https://api.github.com/users/${encodeURIComponent(owner)}/settings/billing/usage?${query}`,
+    `https://api.github.com/${endpoint}/${encodeURIComponent(owner)}/settings/billing/usage?${query}`,
     token, fetchImpl,
   );
   return parseUsedMinutes(payload, token, fetchImpl);
