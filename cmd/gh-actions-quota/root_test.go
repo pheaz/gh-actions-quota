@@ -12,6 +12,7 @@ func TestRootCommandTree(t *testing.T) {
 	root := newRootCommand("v1.2.3", strings.NewReader(""), &output, &errOutput)
 
 	for _, path := range [][]string{
+		{"action"},
 		{"setup"},
 		{"status"},
 		{"uninstall"},
@@ -27,6 +28,25 @@ func TestRootCommandTree(t *testing.T) {
 		if err != nil || command == root {
 			t.Fatalf("command %v not found: %v", path, err)
 		}
+	}
+}
+
+func TestActionCommandPublicRepository(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY_VISIBILITY", "public")
+	t.Setenv("GITHUB_REPOSITORY_OWNER", "owner")
+	t.Setenv("INPUT_THRESHOLD", "")
+	t.Setenv("INPUT_TOKEN", "")
+	t.Setenv("ACTIONS_QUOTA_TOKEN", "")
+	t.Setenv("GITHUB_OUTPUT", "")
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
+	var output, errOutput bytes.Buffer
+	root := newRootCommand("dev", strings.NewReader(""), &output, &errOutput)
+	root.SetArgs([]string{"action"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "allowed=true\n") || !strings.Contains(output.String(), "unmetered=true\n") || errOutput.Len() != 0 {
+		t.Fatalf("wrong Go Action command output: %s %s", output.String(), errOutput.String())
 	}
 }
 

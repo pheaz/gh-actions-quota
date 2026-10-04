@@ -11,10 +11,9 @@ If there is no user-visible change, state that explicitly.
 
 ## Validation
 
-- [ ] `npm run typecheck`
-- [ ] `npm test`
-- [ ] `npm run build`
-- [ ] `git diff --exit-code -- dist/`
+- [ ] `node --check action/launcher.js`
+- [ ] `node --test action/launcher.test.js`
+- [ ] `gofmt` check
 - [ ] `go vet ./...`
 - [ ] `go test -race ./...`
 - [ ] `go build ./cmd/gh-actions-quota`

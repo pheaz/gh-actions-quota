@@ -1,4 +1,4 @@
-package setup
+package quota
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-// The TypeScript action reads the same cases to prevent billing behavior drift.
+// This corpus is consumed by the single shared Go quota implementation.
 func TestSharedBillingContract(t *testing.T) {
 	data, err := os.ReadFile("../../test/fixtures/billing.json")
 	if err != nil {
@@ -65,8 +66,8 @@ func TestSharedBillingContract(t *testing.T) {
 				json.NewEncoder(w).Encode(map[string]any{"private": response.Private})
 			})
 			now, _ := time.Parse(time.RFC3339, "2026-09-01T00:30:00+02:00")
-			c.now = func() time.Time { return now }
-			used, err := c.checkBilling(context.Background(), "owner", fakeToken, ownerType)
+			c.Now = func() time.Time { return now }
+			used, err := c.UsedMinutes(context.Background(), "owner", fakeToken, ownerType)
 			if fixture.Error != "" {
 				if err == nil || err.Error() != fixture.Error {
 					t.Fatalf("billing error = %v, want %s", err, fixture.Error)
@@ -100,7 +101,7 @@ func TestBillingExcludesPublicRepositoriesAndCachesVisibility(t *testing.T) {
 	}
 	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer "+fakeToken ||
-			r.Header.Get("Accept") != "application/vnd.github+json" || r.Header.Get("User-Agent") != "gh-actions-quota" || r.Header.Get("X-GitHub-Api-Version") != apiVersion {
+			r.Header.Get("Accept") != "application/vnd.github+json" || r.Header.Get("User-Agent") != "gh-actions-quota" || r.Header.Get("X-GitHub-Api-Version") != APIVersion {
 			t.Error("wrong billing/repository request headers or method")
 		}
 		switch r.URL.Path {
@@ -117,8 +118,8 @@ func TestBillingExcludesPublicRepositoriesAndCachesVisibility(t *testing.T) {
 		}
 	})
 	now, _ := time.Parse(time.RFC3339, "2026-09-01T00:30:00+02:00")
-	c.now = func() time.Time { return now }
-	used, err := c.checkBilling(context.Background(), "owner", fakeToken, "user")
+	c.Now = func() time.Time { return now }
+	used, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user")
 	if err != nil || used != 500 {
 		t.Fatalf("used = %v, err = %v; want 500", used, err)
 	}
@@ -140,7 +141,7 @@ func TestBillingRepositoryLookupFailures(t *testing.T) {
 				w.WriteHeader(status)
 				io.WriteString(w, fakeToken)
 			})
-			used, err := c.checkBilling(context.Background(), "owner", fakeToken, "user")
+			used, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user")
 			if status == 404 {
 				if err != nil || used != 0 || lookups != 1 {
 					t.Fatalf("404 should be excluded and cached: used=%v err=%v lookups=%d", used, err, lookups)
@@ -166,7 +167,7 @@ func TestBillingFiltersNonQuotaItemsBeforeLookup(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"usageItems": items})
 	})
-	if used, err := c.checkBilling(context.Background(), "owner", fakeToken, "user"); err != nil || used != 0 {
+	if used, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user"); err != nil || used != 0 {
 		t.Fatalf("ignored items counted: used=%v err=%v", used, err)
 	}
 }
@@ -189,7 +190,7 @@ func TestBillingStandardRunnerSKUs(t *testing.T) {
 				}
 				json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{billingItem(100, map[string]any{"sku": test.sku})}})
 			})
-			if used, err := c.checkBilling(context.Background(), "owner", fakeToken, "user"); err != nil || math.IsNaN(used) || math.Abs(used-test.want) > 1e-8 {
+			if used, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user"); err != nil || math.IsNaN(used) || math.Abs(used-test.want) > 1e-8 {
 				t.Fatalf("standard runner excluded: used=%v err=%v", used, err)
 			}
 		})
@@ -200,7 +201,7 @@ func TestBillingValidation(t *testing.T) {
 	for _, body := range []string{`{}`, `{"usageItems":null}`, `{"usageItems":{}}`, `{"usageItems":[null]}`} {
 		t.Run(body, func(t *testing.T) {
 			c := testClient(t, func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) })
-			if _, err := c.checkBilling(context.Background(), "owner", fakeToken, "user"); err == nil {
+			if _, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user"); err == nil {
 				t.Fatal("invalid billing report accepted")
 			}
 		})
@@ -214,7 +215,7 @@ func TestBillingValidation(t *testing.T) {
 				}
 				io.WriteString(w, `{"usageItems":[{"product":"actions","unitType":"Minutes","sku":"actions_linux","repositoryName":"owner/private"`+quantity+`}]}`)
 			})
-			if _, err := c.checkBilling(context.Background(), "owner", fakeToken, "user"); err == nil || err.Error() != "Invalid quantity" {
+			if _, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user"); err == nil || err.Error() != "Invalid quantity" {
 				t.Fatalf("invalid quantity accepted: %v", err)
 			}
 		})
@@ -240,7 +241,7 @@ func TestBillingValidation(t *testing.T) {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"usageItems": test.items})
 		})
-		used, err := c.checkBilling(context.Background(), "owner", fakeToken, "user")
+		used, err := c.UsedMinutes(context.Background(), "owner", fakeToken, "user")
 		if math.IsInf(test.want, 0) {
 			if err == nil || !strings.Contains(err.Error(), "out of range") {
 				t.Fatalf("overflow not rejected: %v", err)
@@ -249,4 +250,15 @@ func TestBillingValidation(t *testing.T) {
 			t.Fatalf("used=%v err=%v want=%v", used, err, test.want)
 		}
 	}
+}
+
+const fakeToken = "ghu_test_only_not_a_real_token"
+
+func testClient(t *testing.T, handler http.HandlerFunc) *Client {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	c := NewClient()
+	c.APIBase = server.URL
+	return c
 }

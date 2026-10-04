@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/philippwallrafen/gh-actions-quota/internal/action"
 	"github.com/philippwallrafen/gh-actions-quota/internal/setup"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +27,15 @@ func newRootCommand(buildVersion string, input io.Reader, output, errOutput io.W
 	root.SetVersionTemplate("gh actions-quota {{.Version}}\n")
 
 	root.AddCommand(
+		&cobra.Command{
+			Use:    "action",
+			Short:  "Run the GitHub Action adapter",
+			Hidden: true,
+			Args:   cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				return action.Run(cmd.Context(), cmd.OutOrStdout())
+			},
+		},
 		&cobra.Command{
 			Use:   "setup",
 			Short: "Configure quota gating for the current repository",

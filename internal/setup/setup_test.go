@@ -326,3 +326,12 @@ func TestSetupReusesStoredCredential(t *testing.T) {
 		t.Fatal("cached setup displayed device authorization")
 	}
 }
+
+func billingItem(quantity any, overrides map[string]any) map[string]any {
+	item := map[string]any{"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": quantity,
+		"pricePerUnit": 0.006, "grossAmount": 3, "discountAmount": 0, "netAmount": 3}
+	for key, value := range overrides {
+		item[key] = value
+	}
+	return item
+}

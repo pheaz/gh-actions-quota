@@ -204,11 +204,10 @@ function preparationRepo(t) {
   const root = temporary(t), origin = join(root, 'origin.git'), checkout = join(root, 'checkout');
   mkdirSync(checkout); gitAt(root, 'init', '--bare', origin); gitAt(checkout, 'init', '-b', 'main');
   gitAt(checkout, 'config', 'user.name', 'test'); gitAt(checkout, 'config', 'user.email', 'test@example.invalid');
-  const build = `node -e "require('fs').writeFileSync('dist/index.js',require('./package.json').version+'\\n')"`;
-  write(checkout, 'package.json', JSON.stringify({name: 'release-fixture', version: '1.2.3', private: true, scripts: {build}}, null, 2) + '\n');
+  write(checkout, 'package.json', JSON.stringify({name: 'release-fixture', version: '1.2.3', private: true}, null, 2) + '\n');
   write(checkout, 'package-lock.json', JSON.stringify({name: 'release-fixture', version: '1.2.3', lockfileVersion: 3, packages: {'': {name: 'release-fixture', version: '1.2.3'}}}, null, 2) + '\n');
   write(checkout, 'internal/setup/workflow.go', 'const actionMajor = "v1"\n');
-  write(checkout, 'README.md', 'Current action major: `v1`\n'); write(checkout, 'dist/index.js', '1.2.3\n');
+  write(checkout, 'README.md', 'Current action major: `v1`\n');
   gitAt(checkout, 'add', '.'); gitAt(checkout, 'commit', '-m', 'initial'); gitAt(checkout, 'remote', 'add', 'origin', origin); gitAt(checkout, 'push', '-u', 'origin', 'main');
   return {root, origin, checkout};
 }
@@ -220,7 +219,6 @@ test('candidate preparation commits a synchronized version and exports the exact
   const output = prepare(repo, 'major');
   assert.match(output, /tag: v2\.0\.0/); assert.equal(sharedVersion(repo.checkout), '2.0.0');
   assert.match(readFileSync(join(repo.checkout, 'internal/setup/workflow.go'), 'utf8'), /"v2"/);
-  assert.equal(readFileSync(join(repo.checkout, 'dist/index.js'), 'utf8'), '2.0.0\n');
   assert.equal(gitAt(repo.checkout, 'rev-parse', 'HEAD^'), base);
   assert.equal(gitAt(repo.origin, 'rev-parse', 'refs/heads/main'), base, 'preparation must not push');
   const fresh = join(repo.root, 'fresh'); mkdirSync(fresh); gitAt(fresh, 'init');

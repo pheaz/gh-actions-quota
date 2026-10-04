@@ -399,21 +399,13 @@ and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage
 
 ## Quota calculation
 
-The action and CLI read `/users/{account}/settings/billing/usage` for the current
-**UTC calendar month** with `product=Actions`. Product and `unitType=Minutes`
-are matched case-insensitively. They count only runtime from
-these standard GitHub-hosted runner SKUs: `actions_linux_slim`,
-`actions_linux`, `actions_linux_arm`, `actions_windows`, `actions_windows_arm`
-and `actions_macos`. Included usage is `sum(quantity × (SKU price / 0.006))`,
-expressed in Linux-equivalent minutes at the standard Linux 2-core rate.
+The Action and CLI use the same Go implementation to estimate the current UTC
+month's private-repository standard-runner usage in Linux-equivalent minutes.
+Public repositories, storage and larger runners are excluded. Billing data can
+be delayed, so this is not a real-time spending limit.
 
-Public repositories, larger runners, self-hosted runners, storage and other
-products are excluded. Current visibility is cached once per repository; only
-confirmed private repositories count. Other lookup failures or invalid counted
-quantities fail closed. Usage is account-wide across the quota account's private
-repositories.
-Billing data can be delayed or lack repository-level detail; the result depends
-on the available report and is **not a real-time spending limit**.
+The formula, SKU prices, normalization and filtering rules are defined in the
+[normative quota calculation specification](spec/quota-calculation.md).
 
 | Plan | Included monthly minutes |
 | --- | ---: |
@@ -461,9 +453,13 @@ action cannot prevent its own job from starting.
 
 ## Development
 
-The action uses strict TypeScript and esbuild, targeting Node.js 24. Its complete
-bundle is committed at `dist/index.js`; `action.yml` runs it with `node24`.
-Node.js and the JavaScript package manager are development/build tools only.
+All quota and Action behavior lives in Go. `action.yml` uses Node.js 24 to run
+`action/launcher.js`, a dependency-free bootstrap that downloads the exact
+`package.json` release version, verifies SHA256 against that release's
+`checksums.txt`, and executes `gh-actions-quota action`. Release assets must be
+reachable from the runner; download and checksum failures fail the step.
+See [ADR 0001](docs/adr/0001-go-core-js-action-launcher.md) for the architecture.
+
 The extension uses Go 1.27.1 or newer. It uses `golang.org/x/term` for the
 cross-platform interactive workflow and job checklists, and `go.yaml.in/yaml/v3`
 for structural validation and targeted YAML edits. Secure login persistence uses
@@ -471,23 +467,24 @@ native macOS Keychain and Windows Credential Manager facilities. Linux persisten
 uses Secret Service through `secret-tool` when available; it is optional and
 there is no insecure file fallback.
 
-After installing the locked development dependencies, validate the action with:
+Validate the launcher and release tooling with Node.js (no npm installation or
+build is required):
 
 ```shell
-npm ci
-npm run typecheck
-npm test
-npm run build
-git diff --exit-code -- dist/
+node --check action/launcher.js
+node --test action/launcher.test.js
+node --test scripts/release.test.mjs
 ```
 
-Validate and build the extension:
+Validate and build the shared Go core, Action command and extension:
 
 ```shell
+test -z "$(gofmt -l cmd internal)"
 go vet ./...
 go test -race ./...
 go build ./cmd/gh-actions-quota
-node --test scripts/release.test.mjs
+bash scripts/build-release.sh "v$(node -p 'require("./package.json").version')"
+node scripts/release.mjs verify-assets "v$(node -p 'require("./package.json").version')" release
 ```
 
 For local extension testing, build the executable at the repository root:
@@ -513,12 +510,13 @@ for a new release. A push to main or a manually pushed tag does not publish a
 release. Use a minor increment for compatible new functionality and a major
 increment for breaking changes to either the action or extension.
 
-The workflow prepares a local version commit, rebuilds the committed action
-bundle, and exports that commit as a Git bundle. Every validation job restores
-that exact candidate: TypeScript checks, action tests, release-management tests,
-Go tests on Linux/macOS/Windows, and the five native extension builds. Major
-increments also update the generated helper's action reference and the current
-major documented here.
+The workflow prepares a local version commit and exports it as a Git bundle.
+Every validation job restores that exact candidate: launcher tests,
+release-management tests, Go quota and Action tests on Linux/macOS/Windows, and
+all five native release builds with checksum verification. Candidate checks test
+these layers independently, without downloading unpublished candidate assets.
+Major increments also update the generated helper's action reference and the
+current major documented here.
 
 After validation, the workflow checks that main still matches its starting
 commit. If main has advanced, it stops without pushing the candidate; start a

@@ -42,7 +42,6 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - run: npm ci
       - name: Prepare release candidate
         id: candidate
         env:

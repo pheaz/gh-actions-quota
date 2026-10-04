@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/philippwallrafen/gh-actions-quota/internal/quota"
 )
 
 // Status reports account quota usage without changing repository files or secrets.
@@ -65,7 +67,7 @@ func (s *setup) status(ctx context.Context) error {
 		}
 	}
 
-	token, plan, quota, err := s.storedAuthorizationForOwner(ctx, account)
+	token, plan, included, err := s.storedAuthorizationForOwner(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -73,8 +75,12 @@ func (s *setup) status(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	usage, err := quota.Calculate(used, float64(included), quota.DefaultThreshold)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(s.output, "\nActions quota:\n  Account: %s\n  Used:    %.2f / %d min  ( %.2f%% )\n  Plan:    %s\n",
-		account, used, quota, used/float64(quota)*100, displayPlan(plan))
+		account, usage.UsedMinutes, included, usage.UsagePercent, displayPlan(plan))
 	return nil
 }
 
