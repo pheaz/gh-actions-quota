@@ -400,16 +400,18 @@ and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage
 ## Quota calculation
 
 The action and CLI read `/users/{account}/settings/billing/usage` for the current
-**UTC calendar month** with `product=Actions`. They count only `unitType=minutes`
-and these standard GitHub-hosted runner SKUs: `actions_linux_slim`,
+**UTC calendar month** with `product=Actions`. Product and `unitType=Minutes`
+are matched case-insensitively. They count only runtime from
+these standard GitHub-hosted runner SKUs: `actions_linux_slim`,
 `actions_linux`, `actions_linux_arm`, `actions_windows`, `actions_windows_arm`
-and `actions_macos`. Included usage is `sum(discountAmount) / 0.006`, expressed
-in Linux-equivalent minutes.
+and `actions_macos`. Included usage is `sum(quantity × (SKU price / 0.006))`,
+expressed in Linux-equivalent minutes at the standard Linux 2-core rate.
 
 Public repositories, larger runners, self-hosted runners, storage and other
-products are excluded. Visibility is cached once per repository. A 404 is
-conservatively counted; other lookup failures or invalid counted discounts fail
-closed. Usage is account-wide across the quota account's private repositories.
+products are excluded. Current visibility is cached once per repository; only
+confirmed private repositories count. Other lookup failures or invalid counted
+quantities fail closed. Usage is account-wide across the quota account's private
+repositories.
 Billing data can be delayed or lack repository-level detail; the result depends
 on the available report and is **not a real-time spending limit**.
 

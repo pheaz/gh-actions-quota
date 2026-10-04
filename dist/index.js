@@ -3,7 +3,7 @@ import { readFileSync, appendFileSync } from "node:fs";
 
 // src/constants.ts
 var API_VERSION = "2026-03-10";
-var LINUX_MINUTE_PRICE_USD = 6e-3;
+var LINUX_BASE_PRICE_USD = 6e-3;
 var DEFAULT_THRESHOLD_PERCENT = 50;
 var INCLUDED_MINUTES_BY_PLAN = Object.freeze({
   free: 2e3,
@@ -14,16 +14,23 @@ var INCLUDED_MINUTES_BY_PLAN = Object.freeze({
 });
 
 // src/billing.ts
-var INCLUDED_SKUS = /* @__PURE__ */ new Set([
-  "actions_linux_slim",
-  "actions_linux",
-  "actions_linux_arm",
-  "actions_windows",
-  "actions_windows_arm",
-  "actions_macos"
-]);
+var SKU_PRICE_PER_MINUTE_USD = {
+  actions_linux_slim: 2e-3,
+  // 0.3333× Linux
+  actions_linux_arm: 5e-3,
+  // 0.8333× Linux
+  actions_linux: 6e-3,
+  // 1.0000× Linux
+  actions_windows: 0.01,
+  // 1.6667× Linux
+  actions_windows_arm: 0.01,
+  // 1.6667× Linux
+  actions_macos: 0.062
+  // 10.3333× Linux
+};
 function normalizeSku(sku) {
-  return typeof sku === "string" ? sku.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  const normalized = typeof sku === "string" ? sku.trim().toLowerCase().replace(/[\s-]+/g, "_") : "";
+  return normalized === "actions_macos_3_core" || normalized === "actions_macos_4_core" ? "actions_macos" : normalized;
 }
 function object(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -58,7 +65,7 @@ async function requestJson(url, token, fetchImpl = fetch) {
     throw new Error("GitHub API returned an invalid response");
   }
 }
-async function isPublicRepository(repository, token, fetchImpl) {
+async function isPrivateRepository(repository, token, fetchImpl) {
   const [owner, name] = repository.split("/", 2);
   if (!owner || !name) return false;
   const response = await request(
@@ -69,7 +76,7 @@ async function isPublicRepository(repository, token, fetchImpl) {
   if (response.status === 404) return false;
   if (!response.ok) throw new Error("GitHub repository lookup failed");
   try {
-    return object(await response.json()).private === false;
+    return object(await response.json()).private === true;
   } catch {
     throw new Error("GitHub API returned an invalid response");
   }
@@ -79,23 +86,24 @@ async function parseUsedMinutes(payload, token, fetchImpl = fetch) {
   if (!Array.isArray(report.usageItems)) {
     throw new Error("GitHub billing response must contain usageItems");
   }
-  const publicRepositories = /* @__PURE__ */ new Map();
-  let discountedUSD = 0;
+  const privateRepositories = /* @__PURE__ */ new Map();
+  let usedMinutes = 0;
   for (const candidate of report.usageItems) {
     const item = object(candidate);
-    if (item.product !== "Actions" || item.unitType !== "minutes" || !INCLUDED_SKUS.has(normalizeSku(item.sku)) || typeof item.repositoryName !== "string") continue;
-    if (!publicRepositories.has(item.repositoryName)) {
-      publicRepositories.set(item.repositoryName, await isPublicRepository(item.repositoryName, token, fetchImpl));
+    const skuPrice = SKU_PRICE_PER_MINUTE_USD[normalizeSku(item.sku)];
+    if (typeof item.product !== "string" || item.product.toLowerCase() !== "actions" || typeof item.unitType !== "string" || item.unitType.toLowerCase() !== "minutes" || typeof skuPrice !== "number" || typeof item.repositoryName !== "string") continue;
+    if (!privateRepositories.has(item.repositoryName)) {
+      privateRepositories.set(item.repositoryName, await isPrivateRepository(item.repositoryName, token, fetchImpl));
     }
-    if (publicRepositories.get(item.repositoryName)) continue;
-    if (typeof item.discountAmount !== "number" || !Number.isFinite(item.discountAmount) || item.discountAmount < 0) {
-      throw new Error("Invalid discountAmount");
+    if (!privateRepositories.get(item.repositoryName)) continue;
+    if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity < 0) {
+      throw new Error("Invalid quantity");
     }
-    discountedUSD += item.discountAmount;
+    const factor = skuPrice / LINUX_BASE_PRICE_USD;
+    usedMinutes += item.quantity * factor;
   }
-  const minutes = discountedUSD / LINUX_MINUTE_PRICE_USD;
-  if (!Number.isFinite(minutes)) throw new Error("GitHub billing usage is out of range");
-  return minutes;
+  if (!Number.isFinite(usedMinutes)) throw new Error("GitHub billing usage is out of range");
+  return usedMinutes;
 }
 async function fetchOwnerType(owner, token, fetchImpl = fetch) {
   const account = await requestJson(`https://api.github.com/users/${encodeURIComponent(owner)}`, token, fetchImpl);
@@ -125,14 +133,14 @@ function includedMinutesForPlan(plan) {
 }
 async function fetchUsedMinutes(owner, token, { ownerType, now = /* @__PURE__ */ new Date(), fetchImpl = fetch } = {}) {
   const type = ownerType || await fetchOwnerType(owner, token, fetchImpl);
-  if (type !== "user") throw new Error("Organization billing is not supported in v1");
+  const endpoint = type === "organization" ? "organizations" : "users";
   const query = new URLSearchParams({
     year: String(now.getUTCFullYear()),
     month: String(now.getUTCMonth() + 1),
     product: "Actions"
   });
   const payload = await requestJson(
-    `https://api.github.com/users/${encodeURIComponent(owner)}/settings/billing/usage?${query}`,
+    `https://api.github.com/${endpoint}/${encodeURIComponent(owner)}/settings/billing/usage?${query}`,
     token,
     fetchImpl
   );

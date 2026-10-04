@@ -16,22 +16,32 @@ import (
 )
 
 const secretName = "ACTIONS_QUOTA_TOKEN"
-const linuxMinutePriceUSD = 0.006
+const linuxBasePriceUSD = 0.006
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
 var accountPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 var skuSeparators = regexp.MustCompile(`[\s-]+`)
-var includedSKUs = map[string]bool{
-	"actions_linux_slim":  true,
-	"actions_linux":       true,
-	"actions_linux_arm":   true,
-	"actions_windows":     true,
-	"actions_windows_arm": true,
-	"actions_macos":       true,
+
+// Quota usage is normalized to the standard Linux 2-core rate:
+// effective minutes = runtime minutes × (SKU price / $0.006).
+// Keep prices and the corresponding Linux-equivalent factors visible here
+// because they define the quota estimate.
+var skuPricePerMinuteUSD = map[string]float64{
+	"actions_linux_slim":  0.002, // 0.3333× Linux
+	"actions_linux_arm":   0.005, // 0.8333× Linux
+	"actions_linux":       0.006, // 1.0000× Linux
+	"actions_windows":     0.010, // 1.6667× Linux
+	"actions_windows_arm": 0.010, // 1.6667× Linux
+	"actions_macos":       0.062, // 10.3333× Linux
 }
 
 func normalizeSKU(sku string) string {
-	return skuSeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(sku)), "_")
+	normalized := skuSeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(sku)), "_")
+	// Standard macOS runners have 3 or 4 cores; larger core counts stay excluded.
+	if normalized == "actions_macos_3_core" || normalized == "actions_macos_4_core" {
+		return "actions_macos"
+	}
+	return normalized
 }
 
 // Run configures quota checks for private repositories; public repositories need no setup.
@@ -113,7 +123,7 @@ func (s *setup) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	used, err := s.client.checkBilling(ctx, owner, token)
+	used, err := s.client.checkBilling(ctx, owner, token, "user")
 	if err != nil {
 		return err
 	}
@@ -192,13 +202,17 @@ func (c *client) checkAccount(ctx context.Context, owner, token string) (string,
 	return plan, quota, nil
 }
 
-func (c *client) checkBilling(ctx context.Context, owner, token string) (float64, error) {
+func (c *client) checkBilling(ctx context.Context, owner, token, ownerType string) (float64, error) {
 	now := c.now().UTC()
+	endpoint := "users"
+	if ownerType == "organization" {
+		endpoint = "organizations"
+	}
 	query := url.Values{"year": {fmt.Sprint(now.Year())}, "month": {fmt.Sprint(int(now.Month()))}, "product": {"Actions"}}
 	var report struct {
 		UsageItems json.RawMessage `json:"usageItems"`
 	}
-	if err := c.request(ctx, http.MethodGet, c.apiBase+"/users/"+url.PathEscape(owner)+"/settings/billing/usage?"+query.Encode(), token, nil, &report); err != nil {
+	if err := c.request(ctx, http.MethodGet, c.apiBase+"/"+endpoint+"/"+url.PathEscape(owner)+"/settings/billing/usage?"+query.Encode(), token, nil, &report); err != nil {
 		return 0, err
 	}
 	var items []*struct {
@@ -206,48 +220,52 @@ func (c *client) checkBilling(ctx context.Context, owner, token string) (float64
 		UnitType       any             `json:"unitType"`
 		SKU            any             `json:"sku"`
 		RepositoryName any             `json:"repositoryName"`
-		DiscountAmount json.RawMessage `json:"discountAmount"`
+		Quantity       json.RawMessage `json:"quantity"`
 	}
 	if len(report.UsageItems) == 0 || json.Unmarshal(report.UsageItems, &items) != nil || items == nil {
 		return 0, errors.New("GitHub billing response must contain usageItems")
 	}
-	publicRepositories := make(map[string]bool)
-	var discountedUSD float64
+	// Visibility is current; historical public/private changes are not reflected here.
+	privateRepositories := make(map[string]bool)
+	var usedMinutes float64
 	for _, item := range items {
 		if item == nil {
 			return 0, errors.New("GitHub billing usage item is invalid")
 		}
 		sku, _ := item.SKU.(string)
+		product, _ := item.Product.(string)
+		unitType, _ := item.UnitType.(string)
+		skuPrice, standardRunner := skuPricePerMinuteUSD[normalizeSKU(sku)]
 		repository, hasRepository := item.RepositoryName.(string)
-		if item.Product != "Actions" || item.UnitType != "minutes" || !includedSKUs[normalizeSKU(sku)] || !hasRepository {
+		if !strings.EqualFold(product, "Actions") || !strings.EqualFold(unitType, "Minutes") || !standardRunner || !hasRepository {
 			continue
 		}
-		public, cached := publicRepositories[repository]
+		private, cached := privateRepositories[repository]
 		if !cached {
 			var err error
-			public, err = c.isPublicRepository(ctx, repository, token)
+			private, err = c.isPrivateRepository(ctx, repository, token)
 			if err != nil {
 				return 0, err
 			}
-			publicRepositories[repository] = public
+			privateRepositories[repository] = private
 		}
-		if public {
+		if !private {
 			continue
 		}
-		var discount *float64
-		if json.Unmarshal(item.DiscountAmount, &discount) != nil || discount == nil || math.IsInf(*discount, 0) || math.IsNaN(*discount) || *discount < 0 {
-			return 0, errors.New("Invalid discountAmount")
+		var quantity *float64
+		if json.Unmarshal(item.Quantity, &quantity) != nil || quantity == nil || math.IsInf(*quantity, 0) || math.IsNaN(*quantity) || *quantity < 0 {
+			return 0, errors.New("Invalid quantity")
 		}
-		discountedUSD += *discount
+		factor := skuPrice / linuxBasePriceUSD
+		usedMinutes += *quantity * factor
 	}
-	used := discountedUSD / linuxMinutePriceUSD
-	if math.IsInf(used, 0) || math.IsNaN(used) {
+	if math.IsInf(usedMinutes, 0) || math.IsNaN(usedMinutes) {
 		return 0, errors.New("GitHub billing usage is out of range")
 	}
-	return used, nil
+	return usedMinutes, nil
 }
 
-func (c *client) isPublicRepository(ctx context.Context, repository, token string) (bool, error) {
+func (c *client) isPrivateRepository(ctx context.Context, repository, token string) (bool, error) {
 	parts := strings.SplitN(repository, "/", 3)
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 		return false, nil
@@ -266,5 +284,5 @@ func (c *client) isPublicRepository(ctx context.Context, repository, token strin
 	if repo == nil {
 		return false, errors.New("GitHub returned an invalid response")
 	}
-	return strings.TrimSpace(string(repo.Private)) == "false", nil
+	return strings.TrimSpace(string(repo.Private)) == "true", nil
 }

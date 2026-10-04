@@ -52,8 +52,8 @@ func TestStatusPublicUsesCurrentPersonalAccount(t *testing.T) {
 					io.WriteString(w, `{"login":"SIGNED-IN","type":"User","plan":{"name":"free"}}`)
 				case "/users/signed-in/settings/billing/usage":
 					json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
-						billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
-						billingItem(18, map[string]any{"repositoryName": repository}),
+						billingItem(742.33, map[string]any{"repositoryName": "signed-in/private"}),
+						billingItem(3000, map[string]any{"repositoryName": repository}),
 					}})
 				case "/repos/signed-in/private":
 					io.WriteString(w, `{"private":true}`)
@@ -282,7 +282,7 @@ func TestStatusPlanFormatting(t *testing.T) {
 				case "/user":
 					json.NewEncoder(w).Encode(map[string]any{"login": "owner", "type": "User", "plan": map[string]string{"name": test.plan}})
 				case "/users/owner/settings/billing/usage":
-					json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{billingItem(742.33*linuxMinutePriceUSD, nil)}})
+					json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{billingItem(742.33, nil)}})
 				case "/repos/owner/private":
 					io.WriteString(w, `{"private":true}`)
 				default:
@@ -311,7 +311,7 @@ func TestStatusWithoutRepositoryUsesCurrentPersonalAccount(t *testing.T) {
 			io.WriteString(w, `{"login":"signed-in","type":"User","plan":{"name":"free"}}`)
 		case "/users/signed-in/settings/billing/usage":
 			json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
-				billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
+				billingItem(742.33, map[string]any{"repositoryName": "signed-in/private"}),
 			}})
 		case "/repos/signed-in/private":
 			io.WriteString(w, `{"private":true}`)
@@ -393,7 +393,7 @@ func TestStatusPublicShowsOnlyPresentSetupArtifacts(t *testing.T) {
 					io.WriteString(w, `{"login":"signed-in","type":"User","plan":{"name":"free"}}`)
 				case "/users/signed-in/settings/billing/usage":
 					json.NewEncoder(w).Encode(map[string]any{"usageItems": []any{
-						billingItem(742.33*linuxMinutePriceUSD, map[string]any{"repositoryName": "signed-in/private"}),
+						billingItem(742.33, map[string]any{"repositoryName": "signed-in/private"}),
 					}})
 				case "/repos/signed-in/private":
 					io.WriteString(w, `{"private":true}`)

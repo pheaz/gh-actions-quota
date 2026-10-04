@@ -2,59 +2,54 @@
   {
     "name": "500 private plus 3000 public with cached visibility",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.2},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.8},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/public", "discountAmount": 6},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows", "repositoryName": "owner/public", "discountAmount": 12},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/public", "discountAmount": "ignored"}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 200, "pricePerUnit": 0.006, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 300, "pricePerUnit": 0.006, "grossAmount": 1.8, "discountAmount": 0, "netAmount": 1.8},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/public", "quantity": 1000, "pricePerUnit": 0.006, "grossAmount": 6.0, "discountAmount": 0, "netAmount": 6.0},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_windows", "repositoryName": "owner/public", "quantity": 1200, "pricePerUnit": 0.01, "grossAmount": 12.0, "discountAmount": 0, "netAmount": 12.0},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/public", "quantity": "ignored", "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
     ],
     "repositories": {"owner/private": {"status": 200, "private": true}, "owner/public": {"status": 200, "private": false}},
     "usedMinutes": 500,
     "lookups": {"owner/private": 1, "owner/public": 1}
   },
   {
-    "name": "six standard runner SKUs",
-    "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux_slim", "repositoryName": "owner/private", "discountAmount": 3},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux_arm", "repositoryName": "owner/private", "discountAmount": 3},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows", "repositoryName": "owner/private", "discountAmount": 3},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows_arm", "repositoryName": "owner/private", "discountAmount": 3},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_macos", "repositoryName": "owner/private", "discountAmount": 3}
-    ],
-    "repositories": {"owner/private": {"status": 200, "private": true}},
-    "usedMinutes": 3000,
-    "lookups": {"owner/private": 1}
-  },
-  {
     "name": "larger self-hosted storage and unrelated usage",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux_4_core", "repositoryName": "owner/private", "discountAmount": "ignored"},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_windows_8_core", "repositoryName": "owner/private", "discountAmount": "ignored"},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_self_hosted", "repositoryName": "owner/private", "discountAmount": "ignored"},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_storage", "repositoryName": "owner/private", "discountAmount": "ignored"},
-      {"product": "Packages", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": "ignored"},
-      {"product": "Actions", "unitType": "gigabytes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": "ignored"},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": null, "discountAmount": "ignored"}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux_4_core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_windows_8_core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_self_hosted", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_storage", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "packages", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "actions", "unitType": "gigabytes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": null, "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6},
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux 4-core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.012, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions macOS 12-core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.012, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_macos_12_core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.012, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "unknown", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.012, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "constructor", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.012, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "linux_4_core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.012, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "windows_8_core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.042, "grossAmount": 4.2, "discountAmount": 0, "netAmount": 4.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "macos_l", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.077, "grossAmount": 7.7, "discountAmount": 0, "netAmount": 7.7},
+      {"product": "actions", "unitType": "Minutes", "sku": "macos_xl", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.102, "grossAmount": 10.2, "discountAmount": 0, "netAmount": 10.2}
     ],
     "repositories": {},
     "usedMinutes": 0,
     "lookups": {}
   },
   {
-    "name": "404 counts and caches",
+    "name": "404 repositories are excluded and cached",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.2},
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 1.8}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 200, "pricePerUnit": 0.006, "grossAmount": 1.2, "discountAmount": 0, "netAmount": 1.2},
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 300, "pricePerUnit": 0.006, "grossAmount": 1.8, "discountAmount": 0, "netAmount": 1.8}
     ],
     "repositories": {"owner/private": {"status": 404}},
-    "usedMinutes": 500,
+    "usedMinutes": 0,
     "lookups": {"owner/private": 1}
   },
   {
     "name": "visibility HTTP 401 fails closed",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 500, "pricePerUnit": 0.006, "grossAmount": 3.0, "discountAmount": 0, "netAmount": 3.0}
     ],
     "repositories": {"owner/private": {"status": 401}},
     "error": "GitHub repository lookup failed",
@@ -63,7 +58,7 @@
   {
     "name": "visibility HTTP 403 fails closed",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 500, "pricePerUnit": 0.006, "grossAmount": 3.0, "discountAmount": 0, "netAmount": 3.0}
     ],
     "repositories": {"owner/private": {"status": 403}},
     "error": "GitHub repository lookup failed",
@@ -72,37 +67,175 @@
   {
     "name": "visibility HTTP 500 fails closed",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": 3}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": 500, "pricePerUnit": 0.006, "grossAmount": 3.0, "discountAmount": 0, "netAmount": 3.0}
     ],
     "repositories": {"owner/private": {"status": 500}},
     "error": "GitHub repository lookup failed",
     "lookups": {"owner/private": 1}
   },
   {
-    "name": "invalid discount null",
+    "name": "invalid quantity null",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": null}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": null, "pricePerUnit": 0.006, "grossAmount": 3, "discountAmount": 0, "netAmount": 3}
     ],
     "repositories": {"owner/private": {"status": 200, "private": true}},
-    "error": "Invalid discountAmount",
+    "error": "Invalid quantity",
     "lookups": {"owner/private": 1}
   },
   {
-    "name": "invalid discount \"3\"",
+    "name": "invalid quantity \"3\"",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": "3"}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": "3", "pricePerUnit": 0.006, "grossAmount": 3, "discountAmount": 0, "netAmount": 3}
     ],
     "repositories": {"owner/private": {"status": 200, "private": true}},
-    "error": "Invalid discountAmount",
+    "error": "Invalid quantity",
     "lookups": {"owner/private": 1}
   },
   {
-    "name": "invalid discount -1",
+    "name": "invalid quantity -1",
     "usageItems": [
-      {"product": "Actions", "unitType": "minutes", "sku": "actions_linux", "repositoryName": "owner/private", "discountAmount": -1}
+      {"product": "actions", "unitType": "Minutes", "sku": "actions_linux", "repositoryName": "owner/private", "quantity": -1, "pricePerUnit": 0.006, "grossAmount": 3, "discountAmount": 0, "netAmount": 3}
     ],
     "repositories": {"owner/private": {"status": 200, "private": true}},
-    "error": "Invalid discountAmount",
+    "error": "Invalid quantity",
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions Linux: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 100,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions Linux Slim: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux Slim", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.002, "grossAmount": 0.2, "discountAmount": 0, "netAmount": 0.2}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 33.33333333333333,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions Linux ARM: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux ARM", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.005, "grossAmount": 0.5, "discountAmount": 0, "netAmount": 0.5}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 83.33333333333333,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions Windows: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Windows", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.01, "grossAmount": 1.0, "discountAmount": 0, "netAmount": 1.0}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 166.66666666666666,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions Windows ARM: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Windows ARM", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.01, "grossAmount": 1.0, "discountAmount": 0, "netAmount": 1.0}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 166.66666666666666,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions macOS 3-core: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions macOS 3-core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.062, "grossAmount": 6.2, "discountAmount": 0, "netAmount": 6.2}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 1033.3333333333333,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "Actions macOS 4-core: 100 runtime minutes with zero discount",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions macOS 4-core", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.062, "grossAmount": 6.2, "discountAmount": 0, "netAmount": 6.2}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 1033.3333333333333,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "mixed runner example",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 49, "pricePerUnit": 0.006, "grossAmount": 0.294, "discountAmount": 0, "netAmount": 0.294},
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux Slim", "repositoryName": "owner/private", "quantity": 1, "pricePerUnit": 0.002, "grossAmount": 0.002, "discountAmount": 0, "netAmount": 0.002},
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Windows", "repositoryName": "owner/private", "quantity": 34, "pricePerUnit": 0.01, "grossAmount": 0.34, "discountAmount": 0, "netAmount": 0.34},
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions macOS 3-core", "repositoryName": "owner/private", "quantity": 198.290322581, "pricePerUnit": 0.062, "grossAmount": 12.294, "discountAmount": 0, "netAmount": 12.294}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 2155,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "case-insensitive product and unit",
+    "usageItems": [
+      {"product": "AcTiOnS", "unitType": "mInUtEs", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 100,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "listed SKU prices determine quota regardless of billing amounts",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0.6, "netAmount": 0},
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.01, "grossAmount": 1, "discountAmount": 0, "netAmount": 1}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 200,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "organization detailed billing endpoint",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "usedMinutes": 100,
+    "lookups": {"owner/private": 1},
+    "ownerType": "organization"
+  },
+  {
+    "name": "unknown repository visibility is excluded",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
+    ],
+    "repositories": {"owner/private": {"status": 200}},
+    "usedMinutes": 0,
+    "lookups": {"owner/private": 1}
+  },
+  {
+    "name": "malformed repository name is excluded",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "missing-owner", "quantity": 100, "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
+    ],
+    "repositories": {},
+    "usedMinutes": 0,
+    "lookups": {}
+  },
+  {
+    "name": "empty month",
+    "usageItems": [],
+    "repositories": {},
+    "usedMinutes": 0,
+    "lookups": {}
+  },
+  {
+    "name": "missing quantity",
+    "usageItems": [
+      {"product": "actions", "unitType": "Minutes", "sku": "Actions Linux", "repositoryName": "owner/private", "pricePerUnit": 0.006, "grossAmount": 0.6, "discountAmount": 0, "netAmount": 0.6}
+    ],
+    "repositories": {"owner/private": {"status": 200, "private": true}},
+    "error": "Invalid quantity",
     "lookups": {"owner/private": 1}
   }
 ]
