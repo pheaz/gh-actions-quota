@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_SERVER }}
     outputs:
       tag: ${{ steps.candidate.outputs.tag }}
       sha: ${{ steps.candidate.outputs.sha }}
@@ -66,7 +66,7 @@ jobs:
 
   publish:
     needs: [prepare, checks]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_SERVER }}
     permissions:
       contents: write
     steps:
