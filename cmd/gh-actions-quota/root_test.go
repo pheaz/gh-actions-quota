@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
 )
@@ -72,5 +73,19 @@ func TestZshCompletionUsesExtensionDisplayName(t *testing.T) {
 	completion := output.String()
 	if completion == "" || !strings.Contains(completion, "actions-quota") {
 		t.Fatal("zsh completion script was not generated for the extension")
+	}
+}
+
+func TestQuotaCommandsExposeOverride(t *testing.T) {
+	for _, name := range []string{"setup", "status"} {
+		var output bytes.Buffer
+		root := newRootCommand("test", strings.NewReader(""), &output, io.Discard)
+		root.SetArgs([]string{name, "--help"})
+		if err := root.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(output.String(), "--quota-minutes string") {
+			t.Fatalf("missing allowance flag: %s", output.String())
+		}
 	}
 }

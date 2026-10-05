@@ -21,12 +21,18 @@ var accountPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 
 // Run configures quota checks for private repositories; public repositories need no setup.
 func Run(ctx context.Context, input io.Reader, output io.Writer) error {
+	return RunWithQuota(ctx, input, output, "")
+}
+
+// RunWithQuota permits an explicit allowance when GitHub cannot expose one.
+func RunWithQuota(ctx context.Context, input io.Reader, output io.Writer, included string) error {
 	root, err := os.Getwd()
 	if err != nil {
 		return errors.New("could not resolve the current working directory")
 	}
 	s := newSetup(input, output)
 	s.root = root
+	s.quotaOverride = included
 	return s.run(ctx)
 }
 
@@ -43,14 +49,15 @@ func newSetup(input io.Reader, output io.Writer) *setup {
 }
 
 type setup struct {
-	gh          runner
-	client      *client
-	input       io.Reader
-	output      io.Writer
-	browser     func(context.Context, string) error
-	clipboard   func(context.Context, string) error
-	credentials credentialStore
-	root        string
+	gh            runner
+	client        *client
+	input         io.Reader
+	output        io.Writer
+	browser       func(context.Context, string) error
+	clipboard     func(context.Context, string) error
+	credentials   credentialStore
+	root          string
+	quotaOverride string
 }
 
 func (s *setup) run(ctx context.Context) error {
@@ -77,12 +84,23 @@ func (s *setup) run(ctx context.Context) error {
 	if _, err := s.gh.Run(ctx, []string{"auth", "status", "--hostname", "github.com"}, nil); err != nil {
 		return errors.New("authenticate GitHub CLI first with gh auth login --hostname github.com")
 	}
-	if err := s.checkOwner(ctx, owner); err != nil {
+	kind, err := s.checkOwner(ctx, owner)
+	if err != nil {
 		return err
+	}
+	if s.quotaOverride != "" {
+		if _, err := quota.ParsePositive(s.quotaOverride); err != nil {
+			return err
+		}
+	} else {
+		s.quotaOverride, err = workflowQuotaOverride(s.root)
+		if err != nil {
+			return err
+		}
 	}
 
 	fmt.Fprintf(s.output, "Repository: %s\n", repo.Name)
-	created, err := ensureReusableWorkflow(s.root)
+	created, err := ensureReusableWorkflowWithQuota(s.root, s.quotaOverride)
 	if err != nil {
 		return err
 	}
@@ -92,21 +110,35 @@ func (s *setup) run(ctx context.Context) error {
 		fmt.Fprintf(s.output, "%s already exists\n", workflowPath)
 	}
 
-	fmt.Fprintln(s.output, "Private repository: requesting gh-actions-quota Account Plan read access...")
+	fmt.Fprintf(s.output, "Account: %s\nOwner type: %s\n", owner, kind)
+	if kind == "organization" {
+		fmt.Fprintln(s.output, "Organization access requires an owner-approved App installation with Administration read and Organization plan read access; authorize as a user with organization billing privileges.")
+	} else {
+		fmt.Fprintln(s.output, "Private repository: requesting gh-actions-quota Account Plan read access...")
+	}
 
-	token, plan, quota, err := s.authorizationForOwner(ctx, owner)
+	token, plan, included, err := s.authorizationForOwner(ctx, owner, kind)
 	if err != nil {
 		return err
 	}
-	used, err := s.client.checkBilling(ctx, owner, token, "user")
+	used, err := s.client.checkBilling(ctx, owner, token, kind)
 	if err != nil {
 		return err
+	}
+	allowance := float64(included)
+	if s.quotaOverride != "" {
+		allowance, _ = quota.ParsePositive(s.quotaOverride)
+		plan = "explicit override"
+	}
+	if allowance == 0 {
+		fmt.Fprintf(s.output, "Actions usage obtained: %.2f Linux-equivalent minutes\nIncluded quota: unavailable\n", used)
+		return quota.ErrQuotaUnavailable
 	}
 	// Token reaches gh only through this pipe, never through argv or command output.
 	if _, err := s.gh.Run(ctx, []string{"secret", "set", secretName, "--repo", repo.Name}, strings.NewReader(token)); err != nil {
 		return errors.New("could not store ACTIONS_QUOTA_TOKEN; check your local gh login and repository secret write access, then run setup again")
 	}
-	fmt.Fprintf(s.output, "\nPlan: %s\nActions usage: %.2f / %d Linux-equivalent minutes\nStored repository secret: %s\n", plan, used, quota, secretName)
+	fmt.Fprintf(s.output, "\nPlan: %s\nActions usage: %.2f / %g Linux-equivalent minutes\nStored repository secret: %s\n", plan, used, allowance, secretName)
 
 	if err := initializeWorkflows(s.root, s.input, s.output); err != nil {
 		return err
@@ -116,18 +148,16 @@ func (s *setup) run(ctx context.Context) error {
 	return nil
 }
 
-func (s *setup) checkOwner(ctx context.Context, owner string) error {
+func (s *setup) checkOwner(ctx context.Context, owner string) (string, error) {
 	ownerType, err := s.gh.Run(ctx, []string{"api", "users/" + owner, "--hostname", "github.com", "--jq", ".type"}, nil)
 	if err != nil {
-		return errors.New("could not determine the repository owner account type")
+		return "", errors.New("could not determine the repository owner account type")
 	}
-	if strings.EqualFold(strings.TrimSpace(string(ownerType)), "Organization") {
-		return errors.New("organization-owned private repositories are not supported in v1; gh-actions-quota only requests personal Account Plan read access")
+	kind := strings.ToLower(strings.TrimSpace(string(ownerType)))
+	if kind != "user" && kind != "organization" {
+		return "", errors.New("unsupported repository owner account type")
 	}
-	if !strings.EqualFold(strings.TrimSpace(string(ownerType)), "User") {
-		return errors.New("unsupported repository owner account type")
-	}
-	return nil
+	return kind, nil
 }
 
 func (s *setup) authorize(ctx context.Context, copyCode bool) (string, error) {
@@ -165,4 +195,24 @@ func (c *client) checkAccount(ctx context.Context, owner, token string) (string,
 
 func (c *client) checkBilling(ctx context.Context, owner, token, ownerType string) (float64, error) {
 	return c.quotaClient().UsedMinutes(ctx, owner, token, ownerType)
+}
+
+func (c *client) checkBillingOwner(ctx context.Context, owner, token, kind string) (string, int, error) {
+	if kind == "organization" {
+		plan, included, err := c.quotaClient().CheckOrganization(ctx, owner, token)
+		if errors.Is(err, quota.ErrQuotaUnavailable) {
+			return plan, 0, nil
+		}
+		return plan, included, err
+	}
+	return c.checkAccount(ctx, owner, token)
+}
+
+func (c *client) checkAuthorization(ctx context.Context, owner, token, kind string) error {
+	if kind == "organization" {
+		_, err := c.checkBilling(ctx, owner, token, kind)
+		return err
+	}
+	_, _, err := c.checkAccount(ctx, owner, token)
+	return err
 }

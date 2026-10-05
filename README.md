@@ -8,8 +8,8 @@ running after a configurable usage threshold is reached.
 - a **GitHub Action** for gating workflow jobs based on Actions quota usage;
 - a **GitHub CLI extension** for setup, authentication and quota status.
 
-It is designed for personal GitHub accounts using standard GitHub-hosted
-runners. Public repositories are detected as unmetered.
+It supports personal accounts and organizations on github.com using standard
+GitHub-hosted runners. Public repositories are detected as unmetered.
 
 ## Quick start
 
@@ -38,6 +38,7 @@ Setup:
 
 Actions quota:
   Account: philippwallrafen
+  Owner type: user
   Used:    742.33 / 2000 min  ( 37.12% )
   Plan:    Free
 ```
@@ -55,7 +56,7 @@ authorization exists.
 
 > [!NOTE]
 > Public repositories using standard GitHub-hosted runners do not consume the
-> personal included Actions quota and therefore require no repository setup.
+> included Actions quota and therefore require no repository setup.
 
 ## Setup
 
@@ -68,16 +69,19 @@ gh actions-quota setup
 ```
 
 For a **private repository**, setup first looks for an existing gh-actions-quota
-authorization for the owning personal account in the operating system's secure
+authorization for the billing owner in the operating system's secure
 credential store. If none is available, setup opens GitHub's device authorization
 page and copies the device code to the clipboard before opening the browser when
-clipboard support is available. Authorize as the **personal account that owns the
-current repository**. After validating the account identity, plan and billing
-access, the extension stores the App token in the OS credential store and saves
+clipboard support is available. For personal ownership, authorize as the
+**personal account that owns the current repository**. After validating the
+account identity, plan and billing access, the extension stores the App token in the OS credential store and saves
 the same token as the repository secret **`ACTIONS_QUOTA_TOKEN`** using your
 existing local `gh` login. The cached authorization is account-scoped, not
 repository-scoped, so other private repositories owned by the same personal
-account can reuse it without another device login.
+account can reuse it without another device login. For an organization owner,
+authorize as a personal user with organization billing privileges; the credential
+is scoped to the organization, and usage covers its private repositories. See
+[organization authorization](#organization-authorization) before running setup.
 
 For a **public repository**, standard GitHub-hosted runners are unmetered. Setup
 prints the repository and its visibility, reports that setup is not required,
@@ -97,7 +101,9 @@ For private repositories, setup also creates
 quota action with a default threshold of 50 percent.
 The Action name, reusable workflow name, job ID/name and step ID are all
 `gh-actions-quota`. Re-running setup leaves an identical generated file unchanged
-and refuses to overwrite any file that differs from the current template.
+and refuses to overwrite custom helper files. The previous generated personal
+helper remains supported without rewriting. An explicit `--quota-minutes` updates
+only a recognized generated helper and preserves its file permissions.
 
 Setup also scans `.github/workflows/*.yml` and
 `.github/workflows/*.yaml` (excluding the generated helper) and shows the files
@@ -160,11 +166,11 @@ Credential Manager, or the Linux Secret Service via `secret-tool`. Explicit
 `auth login` requires secure storage so a successful login is actually reusable.
 Private-repository setup can still continue with an in-memory authorization when
 secure storage is unavailable and will request authorization again next time.
-`status` never starts device flow and requires a stored authorization.
+`status` never starts device flow and requires a stored authorization for metered
+quota reporting; public repositories can be reported as unmetered without one.
 Repository secret writes continue to pipe the token to `gh secret set` through
 stdin. There is no server, central token store or telemetry.
 
-Organization-owned repositories are **not supported for metered billing in v1**.
 Public repositories using standard GitHub-hosted runners need no workflow setup
 or repository token. Status can still show a personal account's private quota
 from a public repository, including one owned by an organization.
@@ -186,9 +192,9 @@ gh actions-quota auth status
 gh actions-quota auth logout
 ```
 
-Inside a private repository, these commands target the personal account that owns
-the repository. Inside a public repository, or outside any repository, they
-target the personal account currently authenticated with `gh` on github.com.
+Inside a private repository, these commands target the billing owner, either a
+personal account or an organization. Inside a public repository, or outside any
+repository, they target the personal account currently authenticated with `gh` on github.com.
 
 `auth login` reuses a valid stored authorization or starts GitHub's device flow
 and stores the resulting App token in the operating system's secure credential
@@ -243,6 +249,7 @@ Repository: not found
 
 Actions quota:
   Account: philippwallrafen
+  Owner type: user
   Used:    742.33 / 2000 min  ( 37.12% )
   Plan:    Free
 ```
@@ -250,9 +257,11 @@ Actions quota:
 When a repository is available, status also reports whether that repository is
 metered and inspects its gh-actions-quota setup.
 
-For a **public repository**, status uses the personal account currently signed in
-with `gh` on github.com. Public repositories are unmetered on standard
-GitHub-hosted runners. Setup artifacts are shown only when they are present:
+For a **public repository**, status retains the personal quota display when a
+usable authorization exists for the personal account currently signed in with
+`gh` on github.com. Without that authorization it reports the repository as
+unmetered successfully, with no device flow or organization billing requests.
+Public repositories are unmetered on standard GitHub-hosted runners. Setup artifacts are shown only when they are present:
 
 ```text
 Repository: some-org/example
@@ -264,6 +273,7 @@ Setup:
 
 Actions quota:
   Account: philippwallrafen
+  Owner type: user
   Used:    742.33 / 2000 min  ( 37.12% )
   Plan:    Free
 ```
@@ -273,9 +283,8 @@ If neither `.github/workflows/gh-actions-quota.yml` nor
 public repositories. A present workflow or secret is shown individually; missing
 public setup artifacts are never printed.
 
-For a **private repository**, status uses the repository owner's personal account
-quota. Organization-owned private repositories remain unsupported. Both setup
-states are always shown:
+For a **private repository**, status uses the repository owner's personal or
+organization quota. Both setup states are always shown:
 
 ```text
 Repository: philippwallrafen/example
@@ -287,6 +296,7 @@ Setup:
 
 Actions quota:
   Account: philippwallrafen
+  Owner type: user
   Used:    742.33 / 2000 min  ( 37.12% )
   Plan:    Free
 ```
@@ -307,12 +317,12 @@ public repository, no secret status is shown. For a private repository, status
 returns an error rather than incorrectly reporting the secret as missing.
 
 Visibility describes the repository. The quota block always describes the
-displayed personal account's private Actions usage across its repositories:
+displayed billing owner's private Actions usage across its repositories:
 the current `gh` account for public repositories or when no repository is found,
 and the repository owner for private repositories.
 
-Both public and private status require a usable authorization already stored for
-the relevant quota account. Status never starts device flow or writes a new
+Metered quota status requires a usable authorization already stored for the
+relevant billing owner. Status never starts device flow or writes a new
 credential. If the credential is missing, invalid, revoked, or belongs to the
 wrong account, status exits with guidance to run:
 
@@ -369,39 +379,123 @@ The **gh-actions-quota** GitHub App uses:
 | --- | --- |
 | Public Client ID | `Iv23liXk29OIBFBTJjap` |
 | Account permission | **Plan: Read-only** |
-| Repository permissions | None |
-| Organization permissions | None in v1 |
+| Repository permissions | **Metadata: Read-only**, for visibility of repositories in an organization billing report; no Contents, Actions, Secrets, or write access |
+| Organization permissions | **Administration: Read-only** for usage; **Organization plan: Read-only** for automatic allowance detection |
 | Device Flow | Enabled |
 | User-to-server token expiration | Disabled |
 | Client secret | Not used |
 | Homepage | https://github.com/philippwallrafen/gh-actions-quota |
 
-The app token only reads the personal account's plan and billing. The app does
+The app token reads plan, billing and repository visibility data. GitHub requires
+organization Administration read access for the usage endpoint; this permission
+also permits other organization administration reads. The app only calls the
+documented read endpoints described below. The app does
 not request `Secrets: write`. Only the locally authenticated `gh` process writes
 the repository secret. The action subsequently reads that secret; it does not
 write repository settings. Expiring tokens and refresh-token responses remain
 rejected; the current non-expiring App user token is protected by the OS
 credential store instead.
 
-Credential keys are scoped by GitHub host and personal account, so one
+Credential keys are scoped by GitHub host and billing owner (user or organization), so one
 authorization is reused for setup and status across repositories on the same
 machine. macOS uses Keychain and Windows uses Credential Manager directly. Linux
 uses the Secret Service through the standard `secret-tool` command; when it is
 not installed or no Secret Service is available, gh-actions-quota deliberately
 falls back to in-memory authorization rather than writing a plaintext credential.
 
-If a cached token is rejected as unauthorized/forbidden or belongs to the wrong
-account, the CLI discards it and performs the device flow again. Authorization
+For personal accounts, a cached token rejected as unauthorized/forbidden or
+belonging to the wrong account is discarded as before. Organization billing
+permission/installation failures preserve the credential and explain the required
+owner approval or user privileges; repeating device login alone cannot grant
+organization access. Unauthorized tokens can still be replaced through auth login. Authorization
 can also be revoked in your GitHub account's authorized GitHub Apps settings.
 
 See GitHub's [device-flow documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 and [billing endpoint permissions](https://docs.github.com/en/rest/billing/usage).
 
+## Organization authorization
+
+Organization support needs a manual GitHub App registration update by the App
+maintainer: keep Account Plan read, Device Flow enabled and non-expiring user
+tokens, and add the organization permissions in the table above. This code does
+not change production App settings. The organization usage endpoint's minimum
+organization permission is Administration read; Organization plan read is needed
+only for automatic quota detection. Repository Metadata read is necessary to
+exclude public usage safely; no repository Contents/Actions/Secrets access is
+needed by the App. The local `gh` login still needs repository secret write access
+for setup, independently of the billing token.
+
+An organization owner must install the App on the organization and approve any
+new permissions on an existing installation. Device authorization alone does not
+install the App or approve its organization permissions. Authorize as an
+organization owner/admin with billing access. GitHub's reporting tutorial also
+mentions billing managers, but the REST endpoint specifically requires an
+organization administrator; a billing-manager title alone is not assumed to
+satisfy the App endpoint. The user token is limited by both the App installation
+and the user's privileges. Organization policies or SSO may require additional
+approval. See GitHub's [installation guide](https://docs.github.com/en/apps/using-github-apps/installing-a-github-app-from-a-third-party),
+[permission changes](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration#changing-the-permissions-of-a-github-app)
+and [usage endpoint](https://docs.github.com/en/rest/billing/usage#get-billing-usage-report-for-an-organization).
+
+Grant the App Metadata read access to every repository with counted usage in the
+organization report, usually by installing on all repositories. A missing or
+unreadable repository, including a 404 that could hide a private repository,
+makes organization usage unavailable. A quota override cannot fix this.
+Public organization repositories require no App setup or organization approval
+just to be reported as unmetered.
+
+Run inside a private organization checkout:
+
+```shell
+cd pheaz/example
+gh actions-quota setup
+gh actions-quota status
+```
+
+Example status after owner approval and device authorization:
+
+```text
+Repository: pheaz/example
+Visibility: Private (metered)
+
+Setup:
+  Workflow: present
+  Secret:   present
+
+Actions quota:
+  Account: pheaz
+  Owner type: organization
+  Used:    750.00 / 3000 min  ( 25.00% )
+  Plan:    Team
+```
+
+If GitHub cannot expose a reliable included allowance, verify it in billing
+settings and provide it explicitly (4,000 below is an example, not an inferred plan):
+
+```shell
+gh actions-quota setup --quota-minutes 4000
+gh actions-quota status --quota-minutes 4000
+```
+
+Setup records the value as the generated helper's `quota-minutes` input default.
+Subsequent setup/status calls reuse that default. The status flag overrides it
+for that invocation without editing files. New helpers forward the optional
+string input to the Action; canonical workflow callers stay unchanged. Modified
+helpers still require manual reconciliation. Re-run setup with an updated value
+when the verified allowance changes.
+
+Existing personal credentials, secrets, and generated helpers keep working.
+Organization users must install/approve the updated App, authorize with
+`gh actions-quota auth login` or setup, and run setup in each repository to store
+the billing token. Installation permission approval can restore access for an
+existing valid user token without discarding it. Outside a repository, auth and
+status continue to use the current personal account.
+
 ## Quota calculation
 
 The Action and CLI use the same Go implementation to estimate the current UTC
 month's private-repository standard-runner usage in Linux-equivalent minutes.
-Public repositories, storage and larger runners are excluded. Billing data can
+Public repositories, self-hosted runners, storage and larger runners are excluded. Billing data can
 be delayed, so this is not a real-time spending limit.
 
 The formula, SKU prices, normalization and filtering rules are defined in the
@@ -414,9 +508,26 @@ The formula, SKU prices, normalization and filtering rules are defined in the
 | Team | 3,000 |
 | Enterprise Cloud | 50,000 |
 
-Team and Enterprise mappings are retained; organization billing is not enabled
-by those mappings in v1. For an unusual personal plan, override the allowance
-explicitly:
+Personal plan mappings remain unchanged. Organization Free (2,000) and Team
+(3,000) are detected from `GET /orgs/{org}` with Organization plan read access,
+using GitHub's [published allowances](https://docs.github.com/en/billing/reference/product-usage-included).
+The organization usage report contains no included quota field. Missing/unknown
+plans, legacy names such as `Medium`, and enterprise plans require a verified
+explicit allowance; personal Pro and legacy aliases are never assumed to be
+organization Team. Enterprise plan names alone do not establish the allowance
+for an organization, including trials or enterprise billing arrangements.
+
+When organization usage is obtained but quota detection fails, the Action reports
+numeric `used-minutes` and `billing-owner-type=organization`, with
+`quota-minutes`, `remaining-minutes` and `usage-percent` set to `unavailable`.
+It warns clearly and sets `usage-available=false` and `allowed=false` so existing
+workflow gates safely skip jobs. Setup/status similarly show the obtained usage
+and return an actionable error instead of inventing an allowance.
+
+An explicit positive, finite `quota-minutes` skips organization plan detection,
+while still requiring valid organization usage and confirmed repository visibility.
+It does not grant authorization or bypass permission failures. For an unusual
+personal plan or an organization requiring a fallback, set it on the Action:
 
 ```yaml
 with:
@@ -432,13 +543,13 @@ with:
 | Output | Meaning |
 | --- | --- |
 | `allowed` | `true` below the threshold; `false` at/above it or on failure |
-| `usage-available` | Whether usage was determined successfully |
+| `usage-available` | Whether usage and allowance are usable for quota gating (false when organization quota is unavailable, even if usage was obtained) |
 | `used-minutes` | Linux-equivalent included minutes consumed |
 | `quota-minutes` | Detected or overridden monthly allowance |
 | `remaining-minutes` | Remaining minutes, with a minimum of zero |
 | `usage-percent` | Percent of included allowance consumed |
 | `billing-owner` | Repository owner whose quota is charged |
-| `billing-owner-type` | `user`; `unmetered` for public repos; `unavailable` on failure |
+| `billing-owner-type` | `user` or `organization`; `unmetered` for public repos; `unavailable` on lookup/billing failure |
 | `unmetered` | `true` for the public-repository shortcut |
 
 For public repositories, standard GitHub-hosted runners are unmetered:

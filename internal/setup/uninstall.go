@@ -127,7 +127,7 @@ func prepareWorkflowUninstall(root string) ([]workflowUninstallUpdate, bool, err
 	if err != nil {
 		return nil, false, fmt.Errorf("could not inspect %s", workflowPath)
 	}
-	if string(data) != reusableWorkflow {
+	if _, recognized := recognizedHelper(string(data)); !recognized {
 		return nil, false, fmt.Errorf("%s differs from the generated template; remove it manually", workflowPath)
 	}
 	return updates, true, nil

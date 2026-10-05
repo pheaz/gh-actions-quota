@@ -61,7 +61,19 @@ type result struct {
 func (a *adapter) run(ctx context.Context) error {
 	r, summary, err := a.evaluate(ctx)
 	if err != nil {
-		fmt.Fprintf(a.output, "::warning title=Actions quota::%s\n", unavailableMessage)
+		message := unavailableMessage
+		var accessError *quota.OrganizationAccessError
+		if errors.As(err, &accessError) {
+			message = accessError.Error()
+		}
+		if errors.Is(err, quota.ErrQuotaUnavailable) {
+			fmt.Fprintf(a.output, "::warning title=Actions quota::%s\n", quota.ErrQuotaUnavailable)
+			if err := a.writeResult(r); err != nil {
+				return err
+			}
+			return a.appendFile("GITHUB_STEP_SUMMARY", summary)
+		}
+		fmt.Fprintf(a.output, "::warning title=Actions quota::%s\n", message)
 		owner := a.env("GITHUB_REPOSITORY_OWNER")
 		if owner == "" {
 			owner = "unknown"
@@ -72,7 +84,7 @@ func (a *adapter) run(ctx context.Context) error {
 			included = formatNumber(value)
 		}
 		r = result{used: "unavailable", quota: included, remaining: "unavailable", percent: "unavailable", owner: owner, ownerType: "unavailable"}
-		summary = "## GitHub Actions quota\n\nUsage unavailable.\n\n" + unavailableMessage + "\n"
+		summary = "## GitHub Actions quota\n\nUsage unavailable.\n\n" + message + "\n"
 	}
 	if err := a.writeResult(r); err != nil {
 		return err
@@ -90,45 +102,88 @@ func (a *adapter) evaluate(ctx context.Context) (result, string, error) {
 		if owner == "" {
 			owner = "unknown"
 		}
-		return result{allowed: true, available: true, unmetered: true, used: "0", quota: "unmetered", remaining: "unmetered", percent: "0", owner: owner, ownerType: "unmetered"},
-			"## GitHub Actions quota\n\nStandard GitHub-hosted runners are unmetered for this public repository.\n", nil
+		return publicResult(owner)
 	}
 	token := a.input("token")
 	if token == "" {
 		token = a.env("ACTIONS_QUOTA_TOKEN")
 	}
-	if owner == "" || token == "" {
-		return result{}, "", errors.New("missing billing owner or token")
+	if owner == "" {
+		return result{}, "", errors.New("missing billing owner")
 	}
+	if !a.privateRepository() {
+		repository := a.env("GITHUB_REPOSITORY")
+		if !strings.HasPrefix(strings.ToLower(repository), strings.ToLower(owner)+"/") {
+			return result{}, "", errors.New("repository visibility unavailable")
+		}
+		visibilityToken := token
+		if visibilityToken == "" {
+			visibilityToken = a.env("GITHUB_TOKEN")
+		}
+		private, err := a.client.RepositoryPrivate(ctx, repository, visibilityToken)
+		if err != nil {
+			return result{}, "", err
+		}
+		if !private {
+			return publicResult(owner)
+		}
+	}
+	if token == "" {
+		return result{}, "", errors.New("missing billing token")
+	}
+
 	kind, err := a.client.OwnerType(ctx, owner, token)
 	if err != nil {
 		return result{}, "", err
 	}
-	if kind != "user" {
-		return result{}, "", errors.New("organization billing is not supported in v1")
-	}
+
 	var included float64
 	if explicit := a.input("quota-minutes"); explicit != "" {
 		included, err = quota.ParsePositive(explicit)
 	} else {
 		var minutes int
-		_, minutes, err = a.client.CheckAccount(ctx, owner, token)
+		if kind == "organization" {
+			_, minutes, err = a.client.CheckOrganization(ctx, owner, token)
+		} else {
+			_, minutes, err = a.client.CheckAccount(ctx, owner, token)
+		}
 		included = float64(minutes)
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, quota.ErrQuotaUnavailable) {
 		return result{}, "", err
 	}
-	used, err := a.client.UsedMinutes(ctx, owner, token, kind)
-	if err != nil {
-		return result{}, "", err
+	quotaErr := err
+	used, billingErr := a.client.UsedMinutes(ctx, owner, token, kind)
+	if billingErr != nil {
+		return result{}, "", billingErr
+	}
+	if quotaErr != nil {
+		r := result{used: formatNumber(used), quota: "unavailable", remaining: "unavailable", percent: "unavailable", owner: owner, ownerType: kind}
+		return r, fmt.Sprintf("## GitHub Actions quota\n\nBilling owner: %s (%s)\n\nUsage obtained: **%s Linux-equivalent minutes**. Included quota unavailable; gated jobs are skipped.\n\n%s\n", owner, kind, r.used, quota.ErrQuotaUnavailable), quotaErr
 	}
 	usage, err := quota.Calculate(used, included, threshold)
 	if err != nil {
 		return result{}, "", err
 	}
 	r := result{allowed: usage.Allowed, available: true, used: formatNumber(usage.UsedMinutes), quota: formatNumber(usage.QuotaMinutes), remaining: formatNumber(usage.RemainingMinutes), percent: formatNumber(usage.UsagePercent), owner: owner, ownerType: kind}
-	summary := fmt.Sprintf("## GitHub Actions quota\n\nUsage: **%s / %s minutes (%s%%)**\n\nThreshold: **%s%%**\n\nAllowed: **%t**\n", r.used, r.quota, r.percent, formatNumber(threshold), r.allowed)
+	summary := fmt.Sprintf("## GitHub Actions quota\n\nBilling owner: %s (%s)\n\nUsage: **%s / %s minutes (%s%%)**\n\nThreshold: **%s%%**\n\nAllowed: **%t**\n", owner, kind, r.used, r.quota, r.percent, formatNumber(threshold), r.allowed)
 	return r, summary, nil
+}
+
+func (a *adapter) privateRepository() bool {
+	if a.env("GITHUB_REPOSITORY_VISIBILITY") == "private" || a.env("GITHUB_REPOSITORY_VISIBILITY") == "internal" {
+		return true
+	}
+	data, err := os.ReadFile(a.env("GITHUB_EVENT_PATH"))
+	if err != nil {
+		return false
+	}
+	var event struct {
+		Repository struct {
+			Private *bool `json:"private"`
+		} `json:"repository"`
+	}
+	return json.Unmarshal(data, &event) == nil && event.Repository.Private != nil && *event.Repository.Private
 }
 
 func formatNumber(value float64) string {
@@ -170,4 +225,9 @@ func (a *adapter) appendFile(key, text string) error {
 		return errors.New("could not write GitHub Action output or summary")
 	}
 	return nil
+}
+
+func publicResult(owner string) (result, string, error) {
+	return result{allowed: true, available: true, unmetered: true, used: "0", quota: "unmetered", remaining: "unmetered", percent: "0", owner: owner, ownerType: "unmetered"},
+		"## GitHub Actions quota\n\nStandard GitHub-hosted runners are unmetered for this public repository.\n", nil
 }
