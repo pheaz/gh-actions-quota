@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   action:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_SERVER }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.LINUX_SERVER || matrix.os }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -90,7 +90,7 @@ jobs:
           fi
 
   binaries:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_SERVER }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
