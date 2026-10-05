@@ -29,23 +29,25 @@ func AuthLogout(ctx context.Context, input io.Reader, output io.Writer) error {
 	return newSetup(input, output).authLogout(ctx)
 }
 
-func (s *setup) authAccount(ctx context.Context) (string, error) {
+func (s *setup) authAccount(ctx context.Context) (string, string, error) {
 	repo, found, err := s.statusRepository(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if found && repo.Private {
 		owner, _, _ := strings.Cut(repo.Name, "/")
-		if err := s.checkOwner(ctx, owner); err != nil {
-			return "", err
+		kind, err := s.checkOwner(ctx, owner)
+		if err != nil {
+			return "", "", err
 		}
-		return owner, nil
+		return owner, kind, nil
 	}
-	return s.currentPersonalAccount(ctx)
+	account, err := s.currentPersonalAccount(ctx)
+	return account, "user", err
 }
 
 func (s *setup) authLogin(ctx context.Context) error {
-	account, err := s.authAccount(ctx)
+	account, kind, err := s.authAccount(ctx)
 	if err != nil {
 		return err
 	}
@@ -55,7 +57,7 @@ func (s *setup) authLogin(ctx context.Context) error {
 
 	if token, loadErr := s.credentials.Load(ctx, account); loadErr == nil {
 		if validCachedToken(token) {
-			if _, _, checkErr := s.client.checkAccount(ctx, account, token); checkErr == nil {
+			if checkErr := s.client.checkAuthorization(ctx, account, token, kind); checkErr == nil {
 				printAuthenticated(s.output, account)
 				return nil
 			} else if !shouldReplaceCachedCredential(checkErr) {
@@ -73,7 +75,7 @@ func (s *setup) authLogin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, _, err := s.client.checkAccount(ctx, account, token); err != nil {
+	if err := s.client.checkAuthorization(ctx, account, token, kind); err != nil {
 		return err
 	}
 	if err := s.credentials.Save(ctx, account, token); err != nil {
@@ -84,7 +86,7 @@ func (s *setup) authLogin(ctx context.Context) error {
 }
 
 func (s *setup) authStatus(ctx context.Context) (bool, error) {
-	account, err := s.authAccount(ctx)
+	account, kind, err := s.authAccount(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -108,7 +110,7 @@ func (s *setup) authStatus(ctx context.Context) (bool, error) {
 		printNotAuthenticated(s.output, account)
 		return false, nil
 	}
-	if _, _, err := s.client.checkAccount(ctx, account, token); err != nil {
+	if err := s.client.checkAuthorization(ctx, account, token, kind); err != nil {
 		if shouldReplaceCachedCredential(err) {
 			_ = s.credentials.Delete(ctx, account)
 			printNotAuthenticated(s.output, account)
@@ -121,7 +123,7 @@ func (s *setup) authStatus(ctx context.Context) (bool, error) {
 }
 
 func (s *setup) authLogout(ctx context.Context) error {
-	account, err := s.authAccount(ctx)
+	account, _, err := s.authAccount(ctx)
 	if err != nil {
 		return err
 	}

@@ -56,7 +56,7 @@ func TestAuthorizationForOwnerReplacesRevokedCredential(t *testing.T) {
 				clipboard:   func(_ context.Context, code string) error { clipboardCalls++; return nil },
 				credentials: store,
 			}
-			token, plan, quota, err := s.authorizationForOwner(context.Background(), "owner")
+			token, plan, quota, err := s.authorizationForOwner(context.Background(), "owner", "user")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,7 +90,7 @@ func TestAuthorizationForOwnerContinuesWhenSecureStoreUnavailable(t *testing.T) 
 	s, output, _ := setupFixture(t, &fakeGH{}, validAccount, 0)
 	store := s.credentials.(*fakeCredentialStore)
 	store.saveErr = errCredentialStoreUnavailable
-	token, plan, quota, err := s.authorizationForOwner(context.Background(), "owner")
+	token, plan, quota, err := s.authorizationForOwner(context.Background(), "owner", "user")
 	if err != nil {
 		t.Fatal(err)
 	}

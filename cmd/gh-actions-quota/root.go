@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 
@@ -36,22 +37,8 @@ func newRootCommand(buildVersion string, input io.Reader, output, errOutput io.W
 				return action.Run(cmd.Context(), cmd.OutOrStdout())
 			},
 		},
-		&cobra.Command{
-			Use:   "setup",
-			Short: "Configure quota gating for the current repository",
-			Args:  cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				return setup.Run(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
-			},
-		},
-		&cobra.Command{
-			Use:   "status",
-			Short: "Show repository setup state and Actions quota usage",
-			Args:  cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				return setup.Status(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
-			},
-		},
+		newQuotaCommand("setup", "Configure quota gating for the current repository", setup.RunWithQuota),
+		newQuotaCommand("status", "Show repository setup state and Actions quota usage", setup.StatusWithQuota),
 		&cobra.Command{
 			Use:   "uninstall",
 			Short: "Remove gh-actions-quota setup from the current repository",
@@ -106,4 +93,13 @@ func newAuthCommand() *cobra.Command {
 		},
 	)
 	return auth
+}
+
+func newQuotaCommand(name, description string, run func(context.Context, io.Reader, io.Writer, string) error) *cobra.Command {
+	var included string
+	cmd := &cobra.Command{Use: name, Short: description, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return run(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), included)
+	}}
+	cmd.Flags().StringVar(&included, "quota-minutes", "", "Override included monthly Actions minutes with a verified allowance")
+	return cmd
 }

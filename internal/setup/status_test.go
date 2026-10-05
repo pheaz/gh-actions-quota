@@ -84,7 +84,7 @@ func TestStatusPublicUsesCurrentPersonalAccount(t *testing.T) {
 			}) {
 				t.Fatalf("unexpected public gh calls: %v", gh.calls)
 			}
-			want := "Repository: " + repository + "\nVisibility: Public (unmetered)\n\nActions quota:\n  Account: signed-in\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
+			want := "Repository: " + repository + "\nVisibility: Public (unmetered)\n\nActions quota:\n  Account: signed-in\n  Owner type: user\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
 			if output.String() != want {
 				t.Fatalf("wrong public output: %s", output)
 			}
@@ -95,24 +95,16 @@ func TestStatusPublicUsesCurrentPersonalAccount(t *testing.T) {
 	}
 }
 
-func TestStatusPublicRequiresStoredAuthenticationWithoutDeviceFlow(t *testing.T) {
+func TestStatusPublicWithoutStoredAuthenticationIsUnmetered(t *testing.T) {
 	gh := &fakeGH{public: true, repository: "some-org/example"}
 	s, output, requests := setupFixture(t, gh, validAccount, 0)
 	s.browser = func(context.Context, string) error { t.Fatal("status opened browser"); return nil }
-	s.clipboard = func(context.Context, string) error { t.Fatal("status used clipboard"); return nil }
-
-	err := s.status(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "not authenticated with gh-actions-quota for signed-in") ||
-		!strings.Contains(err.Error(), "gh actions-quota auth login") {
-		t.Fatalf("missing authentication guidance: %v", err)
+	if err := s.status(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	store := s.credentials.(*fakeCredentialStore)
-	if *requests != 0 || store.loads != 1 || store.saves != 0 || store.deletes != 0 {
-		t.Fatalf("status started authorization or changed credentials: requests=%d store=%+v", *requests, store)
-	}
-	want := "Repository: some-org/example\nVisibility: Public (unmetered)\n"
-	if output.String() != want {
-		t.Fatalf("wrong unauthenticated public output: %s", output)
+	if *requests != 0 || store.saves != 0 || store.deletes != 0 || !strings.Contains(output.String(), "unmetered") {
+		t.Fatalf("public status required authorization: %s", output)
 	}
 }
 
@@ -195,7 +187,7 @@ func TestStatusPrivateReusesStoredCredential(t *testing.T) {
 	if strings.Contains(output.String(), "/login/device") || strings.Contains(output.String(), "Code:") || strings.Contains(output.String(), "Code copied") {
 		t.Fatal("cached status displayed device authorization")
 	}
-	want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Used:    2000.00 / 3000 min  ( 66.67% )\n  Plan:    Pro\n"
+	want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Owner type: user\n  Used:    2000.00 / 3000 min  ( 66.67% )\n  Plan:    Pro\n"
 	if output.String() != want {
 		t.Fatalf("wrong cached private output: %s", output)
 	}
@@ -292,7 +284,7 @@ func TestStatusPlanFormatting(t *testing.T) {
 			if err := s.status(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Used:    742.33 / " + test.quota + " min  ( " + test.percent + "% )\n  Plan:    " + test.display + "\n"
+			want := "Repository: owner/repo\nVisibility: Private (metered)\n\nSetup:\n  Workflow: missing\n  Secret:   missing\n\nActions quota:\n  Account: owner\n  Owner type: user\n  Used:    742.33 / " + test.quota + " min  ( " + test.percent + "% )\n  Plan:    " + test.display + "\n"
 			if output.String() != want {
 				t.Fatalf("wrong status formatting: %s", output)
 			}
@@ -322,7 +314,7 @@ func TestStatusWithoutRepositoryUsesCurrentPersonalAccount(t *testing.T) {
 	if err := s.status(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := "Repository: not found\n\nActions quota:\n  Account: signed-in\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
+	want := "Repository: not found\n\nActions quota:\n  Account: signed-in\n  Owner type: user\n  Used:    742.33 / 2000 min  ( 37.12% )\n  Plan:    Free\n"
 	if output.String() != want {
 		t.Fatalf("wrong status without repository: %s", output)
 	}
@@ -354,7 +346,7 @@ func TestStatusPrivateSetupPresence(t *testing.T) {
 	for _, want := range []string{
 		"Visibility: Private (metered)",
 		"Setup:\n  Workflow: present\n  Secret:   present\n",
-		"Actions quota:\n  Account: owner\n  Used:    2000.00 / 3000 min  ( 66.67% )\n  Plan:    Pro\n",
+		"Actions quota:\n  Account: owner\n  Owner type: user\n  Used:    2000.00 / 3000 min  ( 66.67% )\n  Plan:    Pro\n",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing %q in private setup status: %s", want, output)

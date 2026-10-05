@@ -16,6 +16,7 @@ const credentialService = "gh-actions-quota"
 var errCredentialNotFound = errors.New("credential not found")
 var errCredentialStoreUnavailable = errors.New("secure credential store unavailable")
 var errAuthorizedAccountMismatch = quota.ErrAccountMismatch
+var errAuthenticationRequired = errors.New("not authenticated")
 
 var credentialTokenPattern = regexp.MustCompile(`^ghu_[A-Za-z0-9_]+$`)
 
@@ -38,6 +39,10 @@ func validCachedToken(token string) bool {
 }
 
 func shouldReplaceCachedCredential(err error) bool {
+	var organizationAccess *quota.OrganizationAccessError
+	if errors.As(err, &organizationAccess) {
+		return false
+	}
 	if errors.Is(err, errAuthorizedAccountMismatch) {
 		return true
 	}
@@ -46,10 +51,10 @@ func shouldReplaceCachedCredential(err error) bool {
 }
 
 func authenticationRequired(owner string) error {
-	return fmt.Errorf("not authenticated with gh-actions-quota for %s; run gh actions-quota auth login", owner)
+	return fmt.Errorf("%w with gh-actions-quota for %s; run gh actions-quota auth login", errAuthenticationRequired, owner)
 }
 
-func (s *setup) storedAuthorizationForOwner(ctx context.Context, owner string) (string, string, int, error) {
+func (s *setup) storedAuthorizationForOwner(ctx context.Context, owner, kind string) (string, string, int, error) {
 	if s.credentials == nil {
 		return "", "", 0, errors.New("secure credential storage unavailable; gh actions-quota status requires a stored authorization")
 	}
@@ -67,7 +72,7 @@ func (s *setup) storedAuthorizationForOwner(ctx context.Context, owner string) (
 		_ = s.credentials.Delete(ctx, owner)
 		return "", "", 0, authenticationRequired(owner)
 	}
-	plan, quota, err := s.client.checkAccount(ctx, owner, token)
+	plan, quota, err := s.checkCredentialOwner(ctx, owner, token, kind)
 	if err == nil {
 		return token, plan, quota, nil
 	}
@@ -78,11 +83,11 @@ func (s *setup) storedAuthorizationForOwner(ctx context.Context, owner string) (
 	return "", "", 0, err
 }
 
-func (s *setup) authorizationForOwner(ctx context.Context, owner string) (string, string, int, error) {
+func (s *setup) authorizationForOwner(ctx context.Context, owner, kind string) (string, string, int, error) {
 	if s.credentials != nil {
 		if token, err := s.credentials.Load(ctx, owner); err == nil {
 			if validCachedToken(token) {
-				plan, quota, accountErr := s.client.checkAccount(ctx, owner, token)
+				plan, quota, accountErr := s.checkCredentialOwner(ctx, owner, token, kind)
 				if accountErr == nil {
 					return token, plan, quota, nil
 				}
@@ -98,9 +103,14 @@ func (s *setup) authorizationForOwner(ctx context.Context, owner string) (string
 	if err != nil {
 		return "", "", 0, err
 	}
-	plan, quota, err := s.client.checkAccount(ctx, owner, token)
+	plan, quota, err := s.checkCredentialOwner(ctx, owner, token, kind)
 	if err != nil {
 		return "", "", 0, err
+	}
+	if kind == "organization" {
+		if err := s.client.checkAuthorization(ctx, owner, token, kind); err != nil {
+			return "", "", 0, err
+		}
 	}
 	if s.credentials != nil {
 		if err := s.credentials.Save(ctx, owner, token); err != nil {
@@ -108,4 +118,11 @@ func (s *setup) authorizationForOwner(ctx context.Context, owner string) (string
 		}
 	}
 	return token, plan, quota, nil
+}
+
+func (s *setup) checkCredentialOwner(ctx context.Context, owner, token, kind string) (string, int, error) {
+	if kind == "organization" && s.quotaOverride != "" {
+		return "explicit override", 0, nil
+	}
+	return s.client.checkBillingOwner(ctx, owner, token, kind)
 }

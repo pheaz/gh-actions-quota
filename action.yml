@@ -11,7 +11,7 @@ inputs:
     required: false
     default: "50"
   quota-minutes:
-    description: Override included monthly minutes. By default the action detects the account plan.
+    description: Override included monthly minutes. Required when the user or organization allowance cannot be detected safely.
     required: false
 
 outputs:
@@ -30,7 +30,7 @@ outputs:
   billing-owner:
     description: Repository owner whose Actions quota is charged.
   billing-owner-type:
-    description: user, unmetered, or unavailable.
+    description: user, organization, unmetered, or unavailable.
   unmetered:
     description: Whether standard GitHub-hosted runners are unmetered because the repository is public.
 

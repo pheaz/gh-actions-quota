@@ -14,9 +14,16 @@ import (
 )
 
 // Status reports account quota usage without changing repository files or secrets.
-// It requires a stored gh-actions-quota authorization and never starts device flow.
+// Metered quota requires a stored authorization; status never starts device flow.
 func Status(ctx context.Context, input io.Reader, output io.Writer) error {
-	return newSetup(input, output).status(ctx)
+	return StatusWithQuota(ctx, input, output, "")
+}
+
+// StatusWithQuota overrides the allowance for this invocation without editing files.
+func StatusWithQuota(ctx context.Context, input io.Reader, output io.Writer, included string) error {
+	s := newSetup(input, output)
+	s.quotaOverride = included
+	return s.status(ctx)
 }
 
 func (s *setup) status(ctx context.Context) error {
@@ -26,6 +33,7 @@ func (s *setup) status(ctx context.Context) error {
 	}
 
 	var account string
+	kind := "user"
 	if !found {
 		fmt.Fprintln(s.output, "Repository: not found")
 		account, err = s.currentPersonalAccount(ctx)
@@ -37,7 +45,8 @@ func (s *setup) status(ctx context.Context) error {
 		if repo.Private {
 			fmt.Fprintln(s.output, "Visibility: Private (metered)")
 			account, _, _ = strings.Cut(repo.Name, "/")
-			if err := s.checkOwner(ctx, account); err != nil {
+			kind, err = s.checkOwner(ctx, account)
+			if err != nil {
 				return err
 			}
 		} else {
@@ -67,20 +76,43 @@ func (s *setup) status(ctx context.Context) error {
 		}
 	}
 
-	token, plan, included, err := s.storedAuthorizationForOwner(ctx, account)
+	if s.quotaOverride != "" {
+		if _, err := quota.ParsePositive(s.quotaOverride); err != nil {
+			return err
+		}
+	} else if found && repo.Private {
+		s.quotaOverride, err = workflowQuotaOverride(s.root)
+		if err != nil {
+			return err
+		}
+	}
+	token, plan, included, err := s.storedAuthorizationForOwner(ctx, account, kind)
+	if err != nil {
+		if found && !repo.Private && errors.Is(err, errAuthenticationRequired) {
+			fmt.Fprintln(s.output, "\nStandard GitHub-hosted runners are unmetered for this public repository.")
+			return nil
+		}
+		return err
+	}
+	used, err := s.client.checkBilling(ctx, account, token, kind)
 	if err != nil {
 		return err
 	}
-	used, err := s.client.checkBilling(ctx, account, token, "user")
+	allowance := float64(included)
+	if s.quotaOverride != "" {
+		allowance, _ = quota.ParsePositive(s.quotaOverride)
+		plan = "explicit override"
+	}
+	if allowance == 0 {
+		fmt.Fprintf(s.output, "\nActions quota:\n  Account: %s\n  Owner type: %s\n  Used: %.2f min\n  Included quota: unavailable\n", account, kind, used)
+		return quota.ErrQuotaUnavailable
+	}
+	usage, err := quota.Calculate(used, allowance, quota.DefaultThreshold)
 	if err != nil {
 		return err
 	}
-	usage, err := quota.Calculate(used, float64(included), quota.DefaultThreshold)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(s.output, "\nActions quota:\n  Account: %s\n  Used:    %.2f / %d min  ( %.2f%% )\n  Plan:    %s\n",
-		account, usage.UsedMinutes, included, usage.UsagePercent, displayPlan(plan))
+	fmt.Fprintf(s.output, "\nActions quota:\n  Account: %s\n  Owner type: %s\n  Used:    %.2f / %g min  ( %.2f%% )\n  Plan:    %s\n",
+		account, kind, usage.UsedMinutes, allowance, usage.UsagePercent, displayPlan(plan))
 	return nil
 }
 

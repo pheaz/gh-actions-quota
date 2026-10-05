@@ -20,13 +20,14 @@ import (
 const fakeToken = "test-only-secret-token"
 
 type options struct {
-	env       map[string]string
-	used      float64
-	plan      string
-	ownerType string
-	status    int
-	malformed bool
-	login     string
+	env           map[string]string
+	used          float64
+	plan          string
+	ownerType     string
+	status        int
+	errorEndpoint string
+	malformed     bool
+	login         string
 }
 
 type actionResult struct {
@@ -41,7 +42,7 @@ func runFixture(t *testing.T, opt options) actionResult {
 	directory := t.TempDir()
 	outputPath, summaryPath := filepath.Join(directory, "output"), filepath.Join(directory, "summary")
 	env := map[string]string{
-		"GITHUB_REPOSITORY_OWNER": "owner", "GITHUB_ACTOR": "other-actor", "INPUT_TOKEN": fakeToken,
+		"GITHUB_REPOSITORY_VISIBILITY": "private", "GITHUB_REPOSITORY_OWNER": "owner", "GITHUB_ACTOR": "other-actor", "INPUT_TOKEN": fakeToken,
 		"INPUT_THRESHOLD": "50", "GITHUB_OUTPUT": outputPath, "GITHUB_STEP_SUMMARY": summaryPath,
 	}
 	for key, value := range opt.env {
@@ -62,7 +63,7 @@ func runFixture(t *testing.T, opt options) actionResult {
 		if r.Header.Get("Authorization") != "Bearer "+fakeToken {
 			t.Error("wrong token fallback or precedence")
 		}
-		if opt.status != 0 {
+		if opt.status != 0 && (opt.errorEndpoint == "" || opt.errorEndpoint == r.URL.Path) {
 			w.WriteHeader(opt.status)
 			io.WriteString(w, fakeToken)
 			return
@@ -70,9 +71,11 @@ func runFixture(t *testing.T, opt options) actionResult {
 		switch r.URL.Path {
 		case "/users/owner":
 			json.NewEncoder(w).Encode(map[string]string{"type": opt.ownerType})
+		case "/orgs/owner":
+			json.NewEncoder(w).Encode(map[string]any{"login": "owner", "type": "Organization", "plan": map[string]string{"name": opt.plan}})
 		case "/user":
 			json.NewEncoder(w).Encode(map[string]any{"login": opt.login, "type": "User", "plan": map[string]string{"name": opt.plan}})
-		case "/users/owner/settings/billing/usage":
+		case "/users/owner/settings/billing/usage", "/organizations/owner/settings/billing/usage":
 			var quantity any = opt.used
 			if opt.malformed {
 				quantity = fakeToken
@@ -204,7 +207,7 @@ func TestFailuresAreClosedAndSanitized(t *testing.T) {
 	for _, opt := range []options{
 		{env: map[string]string{"INPUT_TOKEN": ""}},
 		{status: 401}, {status: 403}, {status: 500}, {malformed: true},
-		{ownerType: "Organization"}, {plan: "unknown"}, {login: "someone-else"},
+		{ownerType: "Bot"}, {plan: "unknown"}, {login: "someone-else"},
 		{env: map[string]string{"INPUT_THRESHOLD": fakeToken}},
 		{env: map[string]string{"INPUT_THRESHOLD": "0"}},
 		{env: map[string]string{"INPUT_THRESHOLD": "101"}},
@@ -220,9 +223,6 @@ func TestFailuresAreClosedAndSanitized(t *testing.T) {
 		}
 		if !strings.Contains(result.log, "::warning title=Actions quota::"+unavailableMessage) || !strings.Contains(result.summary, "Usage unavailable.") {
 			t.Fatalf("missing warning or failure summary: %+v", result)
-		}
-		if opt.ownerType == "Organization" && len(result.requests) != 1 {
-			t.Fatal("organizations must fail before plan or billing requests")
 		}
 
 	}
@@ -278,5 +278,84 @@ func TestTransportErrorIsSanitized(t *testing.T) {
 	a := &adapter{env: func(key string) string { return env[key] }, output: &output, client: client}
 	if err := a.run(context.Background()); err != nil || !strings.Contains(output.String(), "allowed=false") || strings.Contains(output.String(), fakeToken) {
 		t.Fatalf("unsafe transport failure: %v %s", err, output.String())
+	}
+}
+
+func TestOrganizationActionAndQuotaFallback(t *testing.T) {
+	for _, test := range []struct{ plan, override, quota, percent, allowed string }{{"team", "", "3000", "25", "true"}, {"free", "", "2000", "37.5", "true"}, {"enterprise", "4000", "4000", "18.75", "true"}, {"unknown", "", "unavailable", "unavailable", "false"}} {
+		t.Run(test.plan, func(t *testing.T) {
+			result := runFixture(t, options{ownerType: "Organization", plan: test.plan, used: 750, env: map[string]string{"INPUT_QUOTA-MINUTES": test.override}})
+			if result.values["billing-owner-type"] != "organization" || result.values["billing-owner"] != "owner" || result.values["used-minutes"] != "750" || result.values["quota-minutes"] != test.quota || result.values["usage-percent"] != test.percent || result.values["allowed"] != test.allowed {
+				t.Fatalf("wrong organization outputs: %+v", result)
+			}
+			if test.quota == "unavailable" && (result.values["usage-available"] != "false" || !strings.Contains(result.summary, "Usage obtained") || !strings.Contains(result.log, "quota-minutes")) {
+				t.Fatalf("missing allowance distinction: %+v", result)
+			}
+			if test.override != "" {
+				for _, path := range result.requests {
+					if path == "/orgs/owner" {
+						t.Fatal("override performed plan lookup")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPublicOrganizationActionDoesNotAuthorize(t *testing.T) {
+	result := runFixture(t, options{ownerType: "Organization", env: map[string]string{"INPUT_TOKEN": "", "GITHUB_REPOSITORY_VISIBILITY": "public"}})
+	if len(result.requests) != 0 || result.values["billing-owner-type"] != "unmetered" || result.values["allowed"] != "true" {
+		t.Fatalf("public org authorized: %+v", result)
+	}
+}
+
+func TestOrganizationActionFailsClosed(t *testing.T) {
+	for _, opt := range []options{
+		{ownerType: "Organization", plan: "team", malformed: true},
+		{ownerType: "Organization", status: 403},
+		{ownerType: "Organization", status: 404},
+		{ownerType: "Organization", env: map[string]string{"INPUT_TOKEN": ""}},
+		{ownerType: "Organization", env: map[string]string{"GITHUB_REPOSITORY_VISIBILITY": ""}},
+	} {
+		result := runFixture(t, opt)
+		if result.values["allowed"] != "false" || result.values["usage-available"] != "false" || result.values["billing-owner-type"] != "unavailable" {
+			t.Fatalf("organization failure opened gate: %+v", result)
+		}
+	}
+}
+
+func TestOrganizationActionBillingPermissionAndApprovalGuidance(t *testing.T) {
+	for _, status := range []int{403, 404} {
+		result := runFixture(t, options{ownerType: "Organization", plan: "team", status: status, errorEndpoint: "/organizations/owner/settings/billing/usage"})
+		if result.values["allowed"] != "false" || result.values["billing-owner-type"] != "unavailable" || !strings.Contains(result.log, "install/approve") || !strings.Contains(result.summary, "billing privileges") {
+			t.Fatalf("org access failure: %+v", result)
+		}
+	}
+}
+
+func TestPublicOrganizationConfirmedByMetadataNeedsNoBillingToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/public" || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected billing/authorization request: %s", r.URL)
+		}
+		io.WriteString(w, `{"private":false}`)
+	}))
+	defer server.Close()
+	client := quota.NewClient()
+	client.APIBase = server.URL
+	env := map[string]string{"GITHUB_REPOSITORY_OWNER": "owner", "GITHUB_REPOSITORY": "owner/public"}
+	var output bytes.Buffer
+	a := &adapter{env: func(key string) string { return env[key] }, output: &output, client: client}
+	if err := a.run(context.Background()); err != nil || !strings.Contains(output.String(), "allowed=true") || !strings.Contains(output.String(), "billing-owner-type=unmetered") {
+		t.Fatalf("metadata public shortcut failed: %v %s", err, output.String())
+	}
+}
+
+func TestUnknownRepositoryVisibilityFailsClosedForBothOwners(t *testing.T) {
+	for _, kind := range []string{"User", "Organization"} {
+		result := runFixture(t, options{ownerType: kind, env: map[string]string{"GITHUB_REPOSITORY_VISIBILITY": ""}})
+		if len(result.requests) != 0 || result.values["allowed"] != "false" || result.values["billing-owner-type"] != "unavailable" {
+			t.Fatalf("unknown visibility accepted: %+v", result)
+		}
 	}
 }

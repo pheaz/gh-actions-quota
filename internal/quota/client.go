@@ -48,7 +48,9 @@ func (c *Client) request(ctx context.Context, endpoint, token string, result any
 		return errors.New("could not construct GitHub request")
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("X-GitHub-Api-Version", APIVersion)
 	req.Header.Set("User-Agent", "gh-actions-quota")
 	response, err := c.HTTP.Do(req)
@@ -58,6 +60,11 @@ func (c *Client) request(ctx context.Context, endpoint, token string, result any
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		return &HTTPError{Status: response.StatusCode}
+	}
+	// Billing usage currently has no documented pagination parameters. Refuse
+	// a partial report if GitHub starts advertising another page.
+	if strings.Contains(response.Header.Get("Link"), `rel="next"`) {
+		return errors.New("GitHub returned a paginated response; complete billing usage cannot be determined safely")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil || len(data) > maxResponseBytes || json.Unmarshal(data, result) != nil {

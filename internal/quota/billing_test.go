@@ -48,7 +48,7 @@ func TestSharedBillingContract(t *testing.T) {
 			lookups := map[string]int{}
 			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/"+endpoint+"/owner/settings/billing/usage" {
-					if r.URL.Query().Get("year") != "2026" || r.URL.Query().Get("month") != "8" || r.URL.Query().Get("product") != "Actions" {
+					if r.URL.Query().Get("year") != "2026" || r.URL.Query().Get("month") != "8" || (ownerType == "user" && r.URL.Query().Get("product") != "Actions") || (ownerType == "organization" && r.URL.Query().Get("product") != "") {
 						t.Error("wrong billing query or UTC month")
 					}
 					json.NewEncoder(w).Encode(map[string]any{"usageItems": fixture.UsageItems})

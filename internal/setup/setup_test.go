@@ -195,15 +195,6 @@ func TestSetupSecretWriteUsesOnlyStdin(t *testing.T) {
 	}
 }
 
-func TestOrganizationRejectedBeforeDeviceFlow(t *testing.T) {
-	gh := &fakeGH{ownerType: "Organization"}
-	s, _, requests := setupFixture(t, gh, validAccount, 0)
-	err := s.run(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "organization-owned") || *requests != 0 {
-		t.Fatal("organization was not rejected before authorization")
-	}
-}
-
 func TestPublicSetupIsNoOp(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprint("existing workflows=", existing), func(t *testing.T) {
