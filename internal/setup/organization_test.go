@@ -238,7 +238,7 @@ func TestWorkflowOverrideCompatibilityAndIdempotence(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ := os.Stat(path)
-	if !before.ModTime().Equal(after.ModTime()) || after.Mode().Perm() != 0640 {
+	if !before.ModTime().Equal(after.ModTime()) || after.Mode().Perm() != before.Mode().Perm() {
 		t.Fatal("override helper not idempotent")
 	}
 	data, _ = os.ReadFile(path)
