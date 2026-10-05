@@ -1,7 +1,6 @@
 node_modules/
 *.tgz
 .DS_Store
-.test-build/
 release/
 /gh-actions-quota
 /gh-actions-quota.exe

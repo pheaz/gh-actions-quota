@@ -7,13 +7,15 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/philippwallrafen/gh-actions-quota/internal/quota"
 )
 
 const credentialService = "gh-actions-quota"
 
 var errCredentialNotFound = errors.New("credential not found")
 var errCredentialStoreUnavailable = errors.New("secure credential store unavailable")
-var errAuthorizedAccountMismatch = errors.New("the authorized personal GitHub account must match the quota account; run the command again and authorize as that account")
+var errAuthorizedAccountMismatch = quota.ErrAccountMismatch
 
 var credentialTokenPattern = regexp.MustCompile(`^ghu_[A-Za-z0-9_]+$`)
 
@@ -40,7 +42,7 @@ func shouldReplaceCachedCredential(err error) bool {
 		return true
 	}
 	var httpError *githubHTTPError
-	return errors.As(err, &httpError) && (httpError.status == http.StatusUnauthorized || httpError.status == http.StatusForbidden)
+	return errors.As(err, &httpError) && (httpError.Status == http.StatusUnauthorized || httpError.Status == http.StatusForbidden)
 }
 
 func authenticationRequired(owner string) error {

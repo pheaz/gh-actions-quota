@@ -37,34 +37,9 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: node scripts/release.mjs restore "$RUNNER_TEMP/release-candidate/candidate.bundle" "$CANDIDATE_SHA"
-      - name: Test release management
-        run: if [ -f scripts/release.test.mjs ]; then node --test scripts/release.test.mjs; fi
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - name: Verify committed action bundle
-        run: |
-          git ls-files --error-unmatch dist/index.js
-          git diff --exit-code -- dist/
-          node --check dist/index.js
-      - name: Smoke-test the bundled public-repository action
-        run: |
-          GITHUB_REPOSITORY_VISIBILITY=public GITHUB_OUTPUT="$RUNNER_TEMP/quota-output" node dist/index.js
-          grep -qx 'allowed=true' "$RUNNER_TEMP/quota-output"
-          grep -qx 'unmetered=true' "$RUNNER_TEMP/quota-output"
-      - name: Run through action.yml in the public repository
-        if: ${{ github.event.repository.private == false }}
-        id: gh-actions-quota
-        uses: ./
-      - name: Verify action outputs
-        if: ${{ github.event.repository.private == false }}
-        env:
-          ALLOWED: ${{ steps.gh-actions-quota.outputs.allowed }}
-          UNMETERED: ${{ steps.gh-actions-quota.outputs.unmetered }}
-        run: |
-          test "$ALLOWED" = true
-          test "$UNMETERED" = true
+      - run: node --check action/launcher.js
+      - run: node --test action/launcher.test.js
+      - run: node --test scripts/release.test.mjs
 
   go:
     strategy:
@@ -96,6 +71,15 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./cmd/gh-actions-quota
+      - name: Smoke-test the Go Action command independently of published releases
+        shell: bash
+        run: |
+          binary=./gh-actions-quota
+          if [[ "$RUNNER_OS" == Windows ]]; then binary=./gh-actions-quota.exe; fi
+          GITHUB_REPOSITORY_VISIBILITY=public GITHUB_OUTPUT="$RUNNER_TEMP/quota-output" GITHUB_STEP_SUMMARY="$RUNNER_TEMP/quota-summary" "$binary" action
+          grep -qx 'allowed=true' "$RUNNER_TEMP/quota-output"
+          grep -qx 'unmetered=true' "$RUNNER_TEMP/quota-output"
+          grep -q 'unmetered' "$RUNNER_TEMP/quota-summary"
       - name: Check Go formatting
         shell: bash
         run: |
@@ -133,10 +117,13 @@ jobs:
           CANDIDATE_TAG: ${{ inputs.candidate_tag }}
         run: |
           tag="${CANDIDATE_TAG:-v$(node -p 'require("./package.json").version')}"
+          test "$tag" = "v$(node -p 'require("./package.json").version')"
           bash scripts/build-release.sh "$tag"
           test "$(release/gh-actions-quota_${tag}_linux-amd64 --version)" = "gh actions-quota $tag"
       - name: Verify all platform checksums
-        run: cd release && sha256sum --check checksums.txt
+        run: |
+          node scripts/release.mjs verify-assets "v$(node -p 'require("./package.json").version')" release
+          cd release && sha256sum --check checksums.txt
       - uses: actions/upload-artifact@v4
         if: ${{ inputs.candidate_artifact != '' }}
         with:

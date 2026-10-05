@@ -6,43 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
-	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/philippwallrafen/gh-actions-quota/internal/quota"
 )
 
 const secretName = "ACTIONS_QUOTA_TOKEN"
-const linuxBasePriceUSD = 0.006
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$`)
 var accountPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
-var skuSeparators = regexp.MustCompile(`[\s-]+`)
-
-// Quota usage is normalized to the standard Linux 2-core rate:
-// effective minutes = runtime minutes × (SKU price / $0.006).
-// Keep prices and the corresponding Linux-equivalent factors visible here
-// because they define the quota estimate.
-var skuPricePerMinuteUSD = map[string]float64{
-	"actions_linux_slim":  0.002, // 0.3333× Linux
-	"actions_linux_arm":   0.005, // 0.8333× Linux
-	"actions_linux":       0.006, // 1.0000× Linux
-	"actions_windows":     0.010, // 1.6667× Linux
-	"actions_windows_arm": 0.010, // 1.6667× Linux
-	"actions_macos":       0.062, // 10.3333× Linux
-}
-
-func normalizeSKU(sku string) string {
-	normalized := skuSeparators.ReplaceAllString(strings.ToLower(strings.TrimSpace(sku)), "_")
-	// Standard macOS runners have 3 or 4 cores; larger core counts stay excluded.
-	if normalized == "actions_macos_3_core" || normalized == "actions_macos_4_core" {
-		return "actions_macos"
-	}
-	return normalized
-}
 
 // Run configures quota checks for private repositories; public repositories need no setup.
 func Run(ctx context.Context, input io.Reader, output io.Writer) error {
@@ -180,109 +155,14 @@ func (s *setup) authorize(ctx context.Context, copyCode bool) (string, error) {
 	return s.client.pollToken(ctx, device)
 }
 
+func (c *client) quotaClient() *quota.Client {
+	return &quota.Client{HTTP: c.http, APIBase: c.apiBase, Now: c.now}
+}
+
 func (c *client) checkAccount(ctx context.Context, owner, token string) (string, int, error) {
-	var account struct {
-		Login string `json:"login"`
-		Type  string `json:"type"`
-		Plan  struct {
-			Name string `json:"name"`
-		} `json:"plan"`
-	}
-	if err := c.request(ctx, http.MethodGet, c.apiBase+"/user", token, nil, &account); err != nil {
-		return "", 0, err
-	}
-	if !strings.EqualFold(account.Login, owner) || !strings.EqualFold(account.Type, "User") {
-		return "", 0, errAuthorizedAccountMismatch
-	}
-	plan := strings.ToLower(strings.TrimSpace(account.Plan.Name))
-	quota := map[string]int{"free": 2000, "pro": 3000, "team": 3000, "enterprise": 50000, "enterprise cloud": 50000}[plan]
-	if quota == 0 {
-		return "", 0, errors.New("GitHub did not return a supported account plan; check Account Plan read access")
-	}
-	return plan, quota, nil
+	return c.quotaClient().CheckAccount(ctx, owner, token)
 }
 
 func (c *client) checkBilling(ctx context.Context, owner, token, ownerType string) (float64, error) {
-	now := c.now().UTC()
-	endpoint := "users"
-	if ownerType == "organization" {
-		endpoint = "organizations"
-	}
-	query := url.Values{"year": {fmt.Sprint(now.Year())}, "month": {fmt.Sprint(int(now.Month()))}, "product": {"Actions"}}
-	var report struct {
-		UsageItems json.RawMessage `json:"usageItems"`
-	}
-	if err := c.request(ctx, http.MethodGet, c.apiBase+"/"+endpoint+"/"+url.PathEscape(owner)+"/settings/billing/usage?"+query.Encode(), token, nil, &report); err != nil {
-		return 0, err
-	}
-	var items []*struct {
-		Product        any             `json:"product"`
-		UnitType       any             `json:"unitType"`
-		SKU            any             `json:"sku"`
-		RepositoryName any             `json:"repositoryName"`
-		Quantity       json.RawMessage `json:"quantity"`
-	}
-	if len(report.UsageItems) == 0 || json.Unmarshal(report.UsageItems, &items) != nil || items == nil {
-		return 0, errors.New("GitHub billing response must contain usageItems")
-	}
-	// Visibility is current; historical public/private changes are not reflected here.
-	privateRepositories := make(map[string]bool)
-	var usedMinutes float64
-	for _, item := range items {
-		if item == nil {
-			return 0, errors.New("GitHub billing usage item is invalid")
-		}
-		sku, _ := item.SKU.(string)
-		product, _ := item.Product.(string)
-		unitType, _ := item.UnitType.(string)
-		skuPrice, standardRunner := skuPricePerMinuteUSD[normalizeSKU(sku)]
-		repository, hasRepository := item.RepositoryName.(string)
-		if !strings.EqualFold(product, "Actions") || !strings.EqualFold(unitType, "Minutes") || !standardRunner || !hasRepository {
-			continue
-		}
-		private, cached := privateRepositories[repository]
-		if !cached {
-			var err error
-			private, err = c.isPrivateRepository(ctx, repository, token)
-			if err != nil {
-				return 0, err
-			}
-			privateRepositories[repository] = private
-		}
-		if !private {
-			continue
-		}
-		var quantity *float64
-		if json.Unmarshal(item.Quantity, &quantity) != nil || quantity == nil || math.IsInf(*quantity, 0) || math.IsNaN(*quantity) || *quantity < 0 {
-			return 0, errors.New("Invalid quantity")
-		}
-		factor := skuPrice / linuxBasePriceUSD
-		usedMinutes += *quantity * factor
-	}
-	if math.IsInf(usedMinutes, 0) || math.IsNaN(usedMinutes) {
-		return 0, errors.New("GitHub billing usage is out of range")
-	}
-	return usedMinutes, nil
-}
-
-func (c *client) isPrivateRepository(ctx context.Context, repository, token string) (bool, error) {
-	parts := strings.SplitN(repository, "/", 3)
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return false, nil
-	}
-	var repo *struct {
-		Private json.RawMessage `json:"private"`
-	}
-	err := c.request(ctx, http.MethodGet, c.apiBase+"/repos/"+url.PathEscape(parts[0])+"/"+url.PathEscape(parts[1]), token, nil, &repo)
-	if err != nil {
-		var httpError *githubHTTPError
-		if errors.As(err, &httpError) && httpError.status == http.StatusNotFound {
-			return false, nil
-		}
-		return false, errors.New("GitHub repository lookup failed")
-	}
-	if repo == nil {
-		return false, errors.New("GitHub returned an invalid response")
-	}
-	return strings.TrimSpace(string(repo.Private)) == "true", nil
+	return c.quotaClient().UsedMinutes(ctx, owner, token, ownerType)
 }

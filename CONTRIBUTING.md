@@ -15,32 +15,29 @@ Security vulnerabilities must not be reported through public issues. See
 
 ## Development setup
 
-The repository contains both:
+The Go core implements the GitHub Action and CLI extension. A dependency-free
+Node.js launcher downloads and verifies the exact matching native release.
+See [ADR 0001](docs/adr/0001-go-core-js-action-launcher.md) and the
+[quota calculation contract](spec/quota-calculation.md).
 
-- a TypeScript GitHub Action;
-- a Go GitHub CLI extension.
+Use the Go version in `go.mod` and Node.js 24 or newer. No npm dependencies,
+transpilation or Action bundle build are needed.
 
-Use the tool versions declared by the repository and install the Node
-dependencies with:
+## Validate the GitHub Action launcher
 
-```shell
-npm ci
-```
-
-## Validate the GitHub Action
-
-Run:
+Run without real network access:
 
 ```shell
-npm run typecheck
-npm test
-npm run build
-git diff --exit-code -- dist/
+node --check action/launcher.js
+node --test action/launcher.test.js
 ```
 
-`dist/index.js` is committed and must match the TypeScript source.
+The Go Action command is tested with the shared quota implementation below.
+Local Action revisions require matching published release assets, so test the
+Go command directly during development rather than launching an unpublished
+candidate.
 
-## Validate the CLI extension
+## Validate the shared Go implementation
 
 Run:
 
@@ -50,7 +47,12 @@ go test -race ./...
 go build ./cmd/gh-actions-quota
 ```
 
-Go source should also be formatted with `gofmt`.
+Go source should also be formatted with `gofmt`. Validate all release targets:
+
+```shell
+bash scripts/build-release.sh "v$(node -p 'require("./package.json").version')"
+node scripts/release.mjs verify-assets "v$(node -p 'require("./package.json").version')" release
+```
 
 ## Release-management tests
 
@@ -70,7 +72,6 @@ A pull request should:
 - include or update tests for changed behavior;
 - update the README when user-facing behavior changes;
 - keep credentials and tokens out of logs, argv and fixtures;
-- keep `dist/index.js` synchronized when Action source changes;
 - pass the repository's GitHub Actions checks.
 
 Do not include real GitHub tokens, repository secrets or credentials in tests,

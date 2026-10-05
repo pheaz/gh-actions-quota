@@ -4,27 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/philippwallrafen/gh-actions-quota/internal/quota"
 )
 
 // The client ID is public. Device authorization needs no client secret.
 const clientID = "Iv23liXk29OIBFBTJjap"
-const apiVersion = "2026-03-10"
+const apiVersion = quota.APIVersion
 
 const maxResponseBytes = 4 << 20
 
-type githubHTTPError struct {
-	status int
-}
-
-func (e *githubHTTPError) Error() string {
-	return fmt.Sprintf("GitHub returned HTTP %d; check authorization and Plan read access", e.status)
-}
+type githubHTTPError = quota.HTTPError
 
 type client struct {
 	http      *http.Client
@@ -80,7 +75,7 @@ func (c *client) request(ctx context.Context, method, endpoint, token string, fo
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return &githubHTTPError{status: response.StatusCode}
+		return &githubHTTPError{Status: response.StatusCode}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil || len(data) > maxResponseBytes || json.Unmarshal(data, result) != nil {

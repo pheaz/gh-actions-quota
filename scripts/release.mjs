@@ -105,9 +105,8 @@ export function prepareCandidate({bump, resumeTag, bundle}) {
     if (git(['ls-remote', 'origin', `refs/tags/${tag}`])) throw new Error(`Tag ${tag} already exists; use resume_tag to recover it`);
     command('npm', ['version', next, '--no-git-tag-version', '--ignore-scripts']);
     updateMajorReferences('.', versionParts(next)[0]);
-    command('npm', ['run', 'build']);
     if (sharedVersion() !== next) throw new Error('Version update failed');
-    const allowed = ['package.json', 'package-lock.json', 'dist/index.js', 'internal/setup/workflow.go', 'README.md'];
+    const allowed = ['package.json', 'package-lock.json', 'internal/setup/workflow.go', 'README.md'];
     const changed = git(['diff', '--name-only']).split('\n').filter(Boolean);
     if (changed.some(path => !allowed.includes(path))) throw new Error('Unexpected files changed during release preparation');
     git(['diff', '--check']);
